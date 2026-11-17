@@ -221,59 +221,60 @@ input:focus-visible {
 
 .sidebar:not(.open),
 .sidebar.collapsed {
-    overflow: visible;
+    overflow: visible !important;
 }
 
 .sidebar:not(.open) .menu,
 .sidebar.collapsed .menu {
-    overflow: visible;
+    overflow: visible !important;
 }
 
 .sidebar:not(.open) a,
 .sidebar.collapsed a {
-    overflow: visible;
+    overflow: visible !important;
+    position: relative !important;
 }
 
 .sidebar:not(.open) a:hover,
 .sidebar.collapsed a:hover {
-    transform: none;
+    transform: none !important;
 }
 
 .sidebar:not(.open) a span,
 .sidebar.collapsed a span {
-    display: none;
+    display: none !important;
 }
 
 .sidebar:not(.open) a::after,
 .sidebar.collapsed a::after {
-    content: attr(title);
-    position: absolute;
-    left: calc(100% + 14px);
-    top: 50%;
-    transform: translateY(-50%);
-    inset: auto;
-    background: #0f172a;
-    border: 1px solid rgba(96, 165, 250, 0.5);
-    color: #f8fafc;
-    padding: 7px 14px;
-    border-radius: 8px;
-    white-space: nowrap;
-    font-size: 0.85rem;
-    font-weight: 600;
-    letter-spacing: 0.3px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7), 0 0 12px rgba(37, 99, 235, 0.3);
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-    transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.2s ease;
-    z-index: 99999;
+    content: attr(title) !important;
+    position: absolute !important;
+    inset: auto !important;
+    left: calc(100% + 12px) !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
+    background: #0f172a !important;
+    border: 1px solid rgba(96, 165, 250, 0.6) !important;
+    color: #ffffff !important;
+    padding: 8px 14px !important;
+    border-radius: 8px !important;
+    white-space: nowrap !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.3px !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7), 0 0 12px rgba(37, 99, 235, 0.4) !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.2s ease !important;
+    z-index: 99999 !important;
 }
 
 .sidebar:not(.open) a:hover::after,
 .sidebar.collapsed a:hover::after {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(-50%) translateX(2px);
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateY(-50%) translateX(3px) !important;
 }
 
 .sidebar a span {
