@@ -1,176 +1,1006 @@
 {% extends "base.html" %}
-{% block title %}Relacionamentos / Movimentações{% endblock %}
-
+{% block title %}Relacionamentos{% endblock %}
 {% block content %}
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+{# ============================================================
+   MACROS — NOMES VISUAIS DOS SLOTS
+============================================================ #}
+{% macro nome_slot_motorola(slot) %}
+    {% if slot <= 4 %}
+        {% if slot == 1 %}
+            Business principal
+        {% else %}
+            Business perfil {{ slot }}
+        {% endif %}
+    {% else %}
+        {% set idx = slot - 5 %}
+        {% set perfil = (idx // 2) + 1 %}
+        {% set normal = (idx % 2) + 1 %}
+        Whats Normal {{ normal }} • Perfil {{ perfil }}
+    {% endif %}
+{% endmacro %}
 
-<header class="chip-header">
-    <div class="container">
-        <div class="chip-header-content">
-            <div class="icon-wrapper">
-                <i class="fas fa-random"></i>
+{% macro nome_slot_outros(slot) %}
+    {% if slot == 1 %}
+        Business
+    {% elif slot == 2 %}
+        Whats Normal 1
+    {% elif slot == 3 %}
+        Whats Normal 2
+    {% else %}
+        Slot {{ slot }}
+    {% endif %}
+{% endmacro %}
+
+<div class="relacionamentos-wrapper">
+
+    <!-- ================= HEADER ================= -->
+    <div class="page-header">
+        <h1><i class="fas fa-link"></i> Relacionamentos WhatsApp x Chips</h1>
+        <p class="subtitle">
+            Gerencie a ocupação dos slots de WhatsApp de cada aparelho.
+        </p>
+    </div>
+
+    <!-- ================= BARRA DE BUSCA GLOBAL ================= -->
+    <div class="search-bar-wrapper">
+        <div class="search-bar-card">
+            <div class="search-input-box">
+                <i class="fas fa-search search-main-icon"></i>
+                <input type="text"
+                       id="searchNumeroInput"
+                       class="search-main-input"
+                       placeholder="Localizar em qual celular está o número (ex: 5511949338797, 94933, Motorola 8, LG)..."
+                       autocomplete="off">
+                <button type="button" id="clearMainSearchBtn" class="btn-clear-main" style="display: none;" onclick="limparBuscaNumero()">
+                    <i class="fas fa-times"></i> Limpar
+                </button>
             </div>
-            <div class="header-text">
-                <h1 class="chip-title">Movimentações</h1>
-                <p class="chip-subtitle">Histórico de entregas, devoluções e ações realizadas</p>
-            </div>
+            <div id="searchFeedback" class="search-feedback"></div>
         </div>
     </div>
-</header>
 
-<main class="container chip-container">
+    <!-- ================= APARELHOS ================= -->
+    <div class="aparelhos-container" id="aparelhosContainer">
 
-    <!-- CARD FORMULÁRIO -->
-    <section class="chip-card">
-        <div class="chip-card-header">
-            <div class="card-icon">
-                <i class="fas fa-plus"></i>
-            </div>
-            <h2 class="card-title">Registrar Movimento</h2>
+    {% for a in aparelhos %}
+    <div class="aparelho-card"
+         id="aparelho-{{ a.sk_aparelho }}"
+         data-aparelho-id="{{ a.sk_aparelho }}"
+         data-aparelho-nome="{{ a.marca }} • {{ a.modelo }}">
+
+        <div class="aparelho-header">
+            <h2>{{ a.marca }} • {{ a.modelo }}</h2>
+            <span class="tag">
+                Capacidade: {{ a.capacidade_total }} WhatsApps
+            </span>
         </div>
 
-        <div class="card-content">
-            <form id="form-evento" class="chip-form">
+        <div class="slots-grid">
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Chip *</label>
-                        <select name="sk_chip" required>
-                            <option value="">Selecione</option>
-                            {% for c in chips %}
-                                <option value="{{ c.sk_chip }}">
-                                    {{ c.numero }} ({{ c.operadora }})
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
+        {% for slot in a.slots %}
+        {% set slot_titulo = nome_slot_motorola(slot.slot)|trim if ('MOTOROLA' in a.marca|upper or 'MOTO' in a.modelo|upper) else nome_slot_outros(slot.slot)|trim %}
+        <div class="slot-card"
+             id="slot-{{ a.sk_aparelho }}-{{ slot.slot }}"
+             data-sk-aparelho="{{ a.sk_aparelho }}"
+             data-slot="{{ slot.slot }}">
 
-                    <div class="form-group">
-                        <label>Aparelho</label>
-                        <select name="sk_aparelho">
-                            <option value="">Nenhum</option>
-                            {% for a in aparelhos %}
-                                <option value="{{ a.sk_aparelho }}">
-                                    {{ a.modelo }} ({{ a.marca }})
-                                </option>
-                            {% endfor %}
-                        </select>
-                    </div>
+            <!-- ===== NOME VISUAL DO SLOT ===== -->
+            <div class="slot-number">
+                {{ slot_titulo }}
+            </div>
 
-                    <div class="form-group">
-                        <label>Tipo de Movimento *</label>
-                        <select name="tipo" required>
-                            <option value="">Selecione</option>
-                            <option value="ENTREGA">ENTREGA</option>
-                            <option value="DEVOLUCAO">DEVOLUÇÃO</option>
-                            <option value="TROCA">TROCA</option>
-                            <option value="RECARGA">RECARGA</option>
-                        </select>
-                    </div>
+            <!-- ===== SLOT OCUPADO ===== -->
+            {% if slot.chip %}
+            <div class="chip-info">
+
+                <div class="chip-number">
+                    {{ slot.chip.numero }}
                 </div>
 
-                <div class="form-row">
-
-                    <div class="form-group">
-                        <label>Origem</label>
-                        <input name="origem" placeholder="Ex.: Painel, Automático, Sistema X">
-                    </div>
-
-                    <div class="form-group full">
-                        <label>Observação</label>
-                        <textarea name="observacao"></textarea>
-                    </div>
+                <div class="chip-operadora">
+                    {{ slot.chip.operadora }}
                 </div>
 
-                <button class="chip-btn">
-                    <i class="fas fa-save"></i> Registrar Movimento
+                {% if slot.chip.tipo_whatsapp %}
+                <span class="badge {{ 'badge-business' if slot.chip.tipo_whatsapp == 'BUSINESS' else 'badge-normal' }}">
+                    {{ slot.chip.tipo_whatsapp }}
+                </span>
+                {% endif %}
+
+                <button class="btn-remove"
+                        onclick="desvincular({{ slot.chip.sk_chip }})">
+                    <i class="fas fa-times"></i> Remover
                 </button>
 
-            </form>
-        </div>
-    </section>
-
-    <!-- CARD LISTAGEM -->
-    <section class="chip-card">
-        <div class="chip-card-header">
-            <div class="card-icon">
-                <i class="fas fa-clock"></i>
             </div>
-            <h2 class="card-title">Movimentações Registradas</h2>
-        </div>
-
-        <div class="card-content">
-
-            <div class="search-wrapper">
-                <i class="fas fa-search search-icon"></i>
-                <input type="text" id="searchInput" class="search-input" placeholder="Buscar movimentações...">
+            {% else %}
+            <!-- ===== SLOT VAZIO ===== -->
+            <div class="chip-empty drop-zone">
+                Slot vazio — selecione ou arraste um chip
             </div>
+            {% endif %}
 
-            <div class="chip-table-wrapper">
-                <table class="chip-table">
-                    <thead>
-                        <tr>
-                            <th>Chip</th>
-                            <th>Aparelho</th>
-                            <th>Tipo</th>
-                            <th>Data</th>
-                            <th>Origem</th>
-                            <th>Observação</th>
-                        </tr>
-                    </thead>
-
-                    <tbody id="tableBody">
-                        {% for r in relacionamentos %}
-                        <tr>
-                            <td>{{ r.numero_chip or r.sk_chip }}</td>
-                            <td>{{ r.modelo_aparelho or "-" }}</td>
-
-                            <td>
-                                <span class="status-badge status-{{ r.tipo|lower }}">
-                                    {{ r.tipo }}
-                                </span>
-                            </td>
-
-                            <td>{{ r.created_at }}</td>
-                            <td>{{ r.origem or "-" }}</td>
-                            <td>{{ r.observacao or "-" }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+            <!-- ===== BOTÃO DE SELEÇÃO RÁPIDA DE CHIP COM BUSCA ===== -->
+            <button type="button"
+                    class="btn-trigger-picker"
+                    onclick="abrirPickerChip({{ a.sk_aparelho }}, '{{ a.marca|escape }} • {{ a.modelo|escape }}', {{ slot.slot }}, '{{ slot_titulo|escape }}')">
+                <span>
+                    {% if slot.chip %}
+                        <i class="fas fa-exchange-alt"></i> Trocar chip…
+                    {% else %}
+                        <i class="fas fa-plus-circle"></i> Selecionar chip…
+                    {% endif %}
+                </span>
+                <i class="fas fa-search picker-trigger-icon" title="Buscar chip na lista"></i>
+            </button>
 
         </div>
-    </section>
+        {% endfor %}
 
-</main>
+        </div>
+    </div>
+    {% endfor %}
+    </div>
+</div>
 
+<!-- ============================================================
+     MODAL DE SELEÇÃO RÁPIDA DE CHIP COM BUSCA EM TEMPO REAL
+============================================================ -->
+<div id="chipPickerModal" class="picker-modal-overlay" style="display: none;" onclick="fecharPickerSeForFora(event)">
+    <div class="picker-modal-card" role="dialog" aria-modal="true" aria-labelledby="pickerModalTitle">
+        
+        <div class="picker-modal-header">
+            <div>
+                <h3 class="picker-modal-title" id="pickerModalTitle">
+                    <i class="fas fa-sim-card"></i> Selecionar Chip para Relacionar
+                </h3>
+                <div class="picker-modal-subtitle" id="pickerSubtitle">
+                    Aparelho • Slot
+                </div>
+            </div>
+            <button type="button" class="picker-modal-close" onclick="fecharPickerChip()" title="Fechar (Esc)">&times;</button>
+        </div>
+
+        <div class="picker-search-container">
+            <i class="fas fa-search picker-search-icon"></i>
+            <input type="text"
+                   id="pickerSearchInput"
+                   class="picker-search-input"
+                   placeholder="Digite o número (ex: 94903) ou operadora (TIM, VIVO)..."
+                   autocomplete="off">
+            <button type="button" id="pickerClearBtn" class="picker-clear-btn" style="display: none;" onclick="limparPickerSearch()">&times;</button>
+        </div>
+
+        <div class="picker-results-bar">
+            <span id="pickerCount">Carregando chips...</span>
+            <small class="picker-hint"><kbd>Enter</kbd> vincula o primeiro chip filtrado</small>
+        </div>
+
+        <div class="picker-list" id="pickerList">
+            <!-- Chips renderizados via JS -->
+        </div>
+
+        <div class="picker-modal-footer">
+            <button type="button" class="btn-fechar-modal" onclick="fecharPickerChip()">Fechar</button>
+        </div>
+
+    </div>
+</div>
+
+<!-- ============================================================
+     JS
+============================================================ -->
 <script>
-// Submete via AJAX
-document.querySelector("#form-evento").onsubmit = async (e) => {
-    e.preventDefault();
+// Dados dos chips disponíveis vindos do servidor
+const CHIPS_DISPONIVEIS = {{ chips_livres|tojson }};
 
-    const data = Object.fromEntries(new FormData(e.target));
+let currentSkAparelho = null;
+let currentSlot = null;
 
-    await fetch("/relacionamentos/add", {
+// ==========================================
+// 1. RECURSO: BUSCAR QUAL CELULAR ESTÁ O NÚMERO
+// ==========================================
+const searchNumeroInput = document.getElementById("searchNumeroInput");
+const clearMainSearchBtn = document.getElementById("clearMainSearchBtn");
+const searchFeedback = document.getElementById("searchFeedback");
+const cards = document.querySelectorAll(".aparelho-card");
+
+searchNumeroInput.addEventListener("input", function() {
+    executarBuscaNumero(this.value);
+});
+
+function executarBuscaNumero(termo) {
+    const rawVal = termo.trim();
+    const val = rawVal.toLowerCase();
+    const numVal = rawVal.replace(/\D/g, "");
+
+    // Limpa destaques anteriores
+    document.querySelectorAll(".slot-card.slot-highlight").forEach(el => el.classList.remove("slot-highlight"));
+
+    if (!val) {
+        cards.forEach(c => c.style.display = "");
+        clearMainSearchBtn.style.display = "none";
+        searchFeedback.textContent = "";
+        return;
+    }
+
+    clearMainSearchBtn.style.display = "inline-flex";
+    let matchCount = 0;
+    let firstMatchingCard = null;
+    let firstMatchingSlot = null;
+
+    cards.forEach(card => {
+        const aparelhoNome = (card.dataset.aparelhoNome || "").toLowerCase();
+        let cardHasMatch = false;
+
+        // Verifica se o termo bate com o nome do aparelho
+        if (aparelhoNome.includes(val)) {
+            cardHasMatch = true;
+        }
+
+        // Verifica os números de chip em cada slot
+        const slotCards = card.querySelectorAll(".slot-card");
+        slotCards.forEach(slot => {
+            const numEl = slot.querySelector(".chip-number");
+            if (numEl) {
+                const chipNum = numEl.textContent.trim();
+                const chipNumDigits = chipNum.replace(/\D/g, "");
+
+                const matchNum = (numVal.length >= 3 && chipNumDigits.includes(numVal)) || chipNum.toLowerCase().includes(val);
+                if (matchNum) {
+                    cardHasMatch = true;
+                    slot.classList.add("slot-highlight");
+                    if (!firstMatchingSlot) {
+                        firstMatchingSlot = slot;
+                    }
+                }
+            }
+        });
+
+        if (cardHasMatch) {
+            card.style.display = "";
+            matchCount++;
+            if (!firstMatchingCard) {
+                firstMatchingCard = card;
+            }
+        } else {
+            card.style.display = "none";
+        }
+    });
+
+    if (matchCount > 0) {
+        searchFeedback.innerHTML = `<span class="feedback-success"><i class="fas fa-check-circle"></i> Encontrado em <strong>${matchCount}</strong> aparelho(s).</span>`;
+        // Traz o celular e o slot até o usuário com scroll suave
+        if (firstMatchingSlot) {
+            firstMatchingSlot.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else if (firstMatchingCard) {
+            firstMatchingCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    } else {
+        searchFeedback.innerHTML = `<span class="feedback-empty"><i class="fas fa-exclamation-triangle"></i> Nenhum aparelho encontrado com o número/termo "<strong>${escapeHtml(rawVal)}</strong>".</span>`;
+    }
+}
+
+function limparBuscaNumero() {
+    searchNumeroInput.value = "";
+    executarBuscaNumero("");
+    searchNumeroInput.focus();
+}
+
+// ==========================================
+// 2. RECURSO: SELETOR DE CHIP COM BUSCA INTERNA
+// ==========================================
+const pickerModal = document.getElementById("chipPickerModal");
+const pickerSearchInput = document.getElementById("pickerSearchInput");
+const pickerClearBtn = document.getElementById("pickerClearBtn");
+const pickerSubtitle = document.getElementById("pickerSubtitle");
+const pickerCount = document.getElementById("pickerCount");
+const pickerList = document.getElementById("pickerList");
+
+let filteredChips = [];
+
+function abrirPickerChip(sk_aparelho, nome_aparelho, slot, nome_slot) {
+    currentSkAparelho = Number(sk_aparelho);
+    currentSlot = Number(slot);
+
+    pickerSubtitle.innerHTML = `Aparelho: <strong>${escapeHtml(nome_aparelho)}</strong> &bull; Slot: <strong>${escapeHtml(nome_slot)}</strong>`;
+    pickerSearchInput.value = "";
+    pickerClearBtn.style.display = "none";
+
+    filtrarChipsNoPicker("");
+
+    pickerModal.style.display = "flex";
+    setTimeout(() => {
+        pickerSearchInput.focus();
+    }, 100);
+}
+
+function fecharPickerChip() {
+    pickerModal.style.display = "none";
+    currentSkAparelho = null;
+    currentSlot = null;
+}
+
+function fecharPickerSeForFora(e) {
+    if (e.target === pickerModal) {
+        fecharPickerChip();
+    }
+}
+
+pickerSearchInput.addEventListener("input", function() {
+    filtrarChipsNoPicker(this.value);
+});
+
+pickerSearchInput.addEventListener("keydown", function(e) {
+    if (e.key === "Enter" && filteredChips.length > 0) {
+        e.preventDefault();
+        selecionarChipPicker(filteredChips[0].sk_chip);
+    } else if (e.key === "Escape") {
+        fecharPickerChip();
+    }
+});
+
+function limparPickerSearch() {
+    pickerSearchInput.value = "";
+    filtrarChipsNoPicker("");
+    pickerSearchInput.focus();
+}
+
+function filtrarChipsNoPicker(termo) {
+    const raw = termo.trim();
+    const query = raw.toLowerCase();
+    const digits = raw.replace(/\D/g, "");
+
+    pickerClearBtn.style.display = raw ? "inline-flex" : "none";
+
+    if (!raw) {
+        filteredChips = [...CHIPS_DISPONIVEIS];
+    } else {
+        filteredChips = CHIPS_DISPONIVEIS.filter(c => {
+            const num = String(c.numero || "");
+            const numDigits = num.replace(/\D/g, "");
+            const op = String(c.operadora || "").toLowerCase();
+            const tp = String(c.tipo_whatsapp || "").toLowerCase();
+
+            const matchNum = (digits.length >= 2 && numDigits.includes(digits)) || num.toLowerCase().includes(query);
+            const matchOp = op.includes(query);
+            const matchTp = tp.includes(query);
+
+            return matchNum || matchOp || matchTp;
+        });
+    }
+
+    renderizarListaChips(filteredChips, raw);
+}
+
+function renderizarListaChips(lista, termoBusca) {
+    pickerCount.textContent = `${lista.length} chip(s) disponível(is) para seleção`;
+
+    if (lista.length === 0) {
+        pickerList.innerHTML = `
+            <div class="picker-empty-state">
+                <i class="fas fa-search" style="font-size: 2rem; margin-bottom: 8px; opacity: 0.5;"></i>
+                <p>Nenhum chip livre encontrado com "<strong>${escapeHtml(termoBusca)}</strong>".</p>
+                <small style="color:#64748b;">Verifique o número digitado ou limpe a busca.</small>
+            </div>
+        `;
+        return;
+    }
+
+    let html = "";
+    lista.forEach(c => {
+        const badgeClass = (c.tipo_whatsapp === "BUSINESS") ? "badge-business" : "badge-normal";
+        html += `
+            <div class="picker-chip-item" onclick="selecionarChipPicker(${c.sk_chip})">
+                <div class="picker-chip-left">
+                    <span class="picker-chip-num">${escapeHtml(c.numero)}</span>
+                    <span class="picker-chip-op">${escapeHtml(c.operadora || "-")}</span>
+                    <span class="badge ${badgeClass}" style="margin-left: 8px;">${escapeHtml(c.tipo_whatsapp || "NORMAL")}</span>
+                </div>
+                <button type="button" class="btn-picker-select">
+                    <i class="fas fa-link"></i> Vincular
+                </button>
+            </div>
+        `;
+    });
+
+    pickerList.innerHTML = html;
+}
+
+function selecionarChipPicker(sk_chip) {
+    if (!sk_chip || !currentSkAparelho || !currentSlot) return;
+
+    const btn = event?.currentTarget?.querySelector?.(".btn-picker-select");
+    if (btn) {
+        btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Vinculando...`;
+        btn.disabled = true;
+    }
+
+    executarVinculo(sk_chip, currentSkAparelho, currentSlot);
+}
+
+function executarVinculo(sk_chip, sk_aparelho, slot) {
+    fetch("/relacionamentos/vincular", {
         method: "POST",
-        body: new URLSearchParams(data)
-    });
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            sk_chip: Number(sk_chip),
+            sk_aparelho: Number(sk_aparelho),
+            slot: Number(slot)
+        })
+    })
+    .then(r => r.json())
+    .then(resp => {
+        if (!resp.ok) {
+            alert(resp.error || "Erro ao vincular");
+            return;
+        }
+        location.reload();
+    })
+    .catch(() => alert("Erro de comunicação ao vincular chip."));
+}
 
-    location.reload();
-};
+function desvincular(sk_chip) {
+    if (!confirm("Deseja realmente desvincular este chip do aparelho?")) return;
 
-// Filtro dinâmico da tabela
-document.getElementById("searchInput").addEventListener("input", function (e) {
-    const txt = e.target.value.toLowerCase();
-    const rows = document.querySelectorAll("#tableBody tr");
+    fetch("/relacionamentos/desvincular", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sk_chip: Number(sk_chip) })
+    })
+    .then(() => location.reload())
+    .catch(() => alert("Erro ao desvincular chip."));
+}
 
-    rows.forEach(row => {
-        row.style.display =
-            row.innerText.toLowerCase().includes(txt) ? "" : "none";
-    });
+function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape" && pickerModal.style.display === "flex") {
+        fecharPickerChip();
+    }
 });
 </script>
+
+<!-- ============================================================
+     ESTILO
+============================================================ -->
+<style>
+.relacionamentos-wrapper {
+    padding-left: 90px;
+    padding-right: 24px;
+    padding-top: 24px;
+}
+
+@media (min-width: 1024px) {
+    .relacionamentos-wrapper {
+        padding-left: 260px;
+    }
+}
+
+.page-header { margin-bottom: 1.5rem; }
+
+.subtitle {
+    color: #94a3b8;
+    font-size: 0.95rem;
+}
+
+/* ============================================================
+   BARRA DE BUSCA GLOBAL
+============================================================ */
+.search-bar-wrapper {
+    margin-bottom: 2rem;
+}
+
+.search-bar-card {
+    background: #111827;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 16px;
+    padding: 1rem 1.25rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+.search-input-box {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #0f172a;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    border-radius: 12px;
+    padding: 0 16px;
+    transition: all 0.2s ease;
+}
+
+.search-input-box:focus-within {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+.search-main-icon {
+    color: #60a5fa;
+    font-size: 1.1rem;
+}
+
+.search-main-input {
+    width: 100%;
+    padding: 12px 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #f8fafc;
+    font-size: 0.95rem;
+}
+
+.search-main-input::placeholder {
+    color: #64748b;
+}
+
+.btn-clear-main {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.btn-clear-main:hover {
+    background: rgba(239, 68, 68, 0.35);
+}
+
+.search-feedback {
+    margin-top: 8px;
+    font-size: 0.88rem;
+}
+
+.feedback-success {
+    color: #4ade80;
+}
+
+.feedback-empty {
+    color: #fbbf24;
+}
+
+/* ============================================================
+   APARELHOS & SLOTS
+============================================================ */
+.aparelhos-container {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.aparelho-card {
+    background: #111827;
+    padding: 1.6rem;
+    border-radius: 16px;
+    border: 1px solid #1e3a8a55;
+    box-shadow: 0 0 18px #1e3a8a22;
+    transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.aparelho-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.4rem;
+}
+
+.aparelho-header h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #f1f5f9;
+}
+
+.tag {
+    background: #1e3a8a55;
+    padding: 6px 14px;
+    border-radius: 999px;
+    color: #93c5fd;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.slots-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 1.1rem;
+}
+
+.slot-card {
+    background: #0f172a;
+    padding: 1rem;
+    border-radius: 14px;
+    border: 1px solid #1e3a8a33;
+    min-height: 210px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Destaque quando o número buscado for encontrado */
+.slot-card.slot-highlight {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.5), inset 0 0 12px rgba(59, 130, 246, 0.2) !important;
+    transform: translateY(-3px) scale(1.02);
+    background: #172554 !important;
+}
+
+.slot-number {
+    color: #60a5fa;
+    font-weight: 600;
+    margin-bottom: .6rem;
+    font-size: 0.9rem;
+}
+
+.chip-info {
+    background: #1e40af33;
+    padding: 10px;
+    border-radius: 10px;
+    margin-bottom: .6rem;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.chip-number {
+    font-weight: 700;
+    color: #93c5fd;
+    font-size: 0.95rem;
+    font-family: monospace;
+    letter-spacing: 0.5px;
+}
+
+.chip-operadora {
+    font-size: .85rem;
+    color: #cbd5e1;
+    margin-bottom: .3rem;
+    font-weight: 500;
+}
+
+.badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: .7rem;
+    font-weight: 700;
+}
+
+.badge-business {
+    background: #16a34a33;
+    color: #4ade80;
+    border: 1px solid rgba(74, 222, 128, 0.3);
+}
+
+.badge-normal {
+    background: #2563eb33;
+    color: #93c5fd;
+    border: 1px solid rgba(147, 197, 253, 0.3);
+}
+
+.chip-empty {
+    color: #64748b;
+    margin-bottom: .6rem;
+    font-size: 0.85rem;
+    padding: 10px 0;
+}
+
+.btn-remove {
+    background: #dc2626;
+    color: #fff;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: .8rem;
+    margin-top: 6px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.2s;
+}
+
+.btn-remove:hover {
+    background: #b91c1c;
+}
+
+/* ============================================================
+   BOTÃO DE SELEÇÃO RÁPIDA DE CHIP
+============================================================ */
+.btn-trigger-picker {
+    width: 100%;
+    padding: 9px 12px;
+    border-radius: 10px;
+    margin-top: auto;
+    background: #020617;
+    color: #e5e7eb;
+    border: 1px solid #1e3a8a66;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.btn-trigger-picker:hover {
+    background: #1e293b;
+    border-color: #3b82f6;
+    color: #60a5fa;
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.2);
+}
+
+.picker-trigger-icon {
+    font-size: 0.75rem;
+    color: #60a5fa;
+    opacity: 0.85;
+}
+
+/* ============================================================
+   MODAL DE SELEÇÃO RÁPIDA DE CHIP COM BUSCA
+============================================================ */
+.picker-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(4px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 100000;
+    padding: 20px;
+}
+
+.picker-modal-card {
+    background: #0f172a;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    border-radius: 18px;
+    width: 100%;
+    max-width: 580px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 20px rgba(59, 130, 246, 0.25);
+    animation: modalScaleIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalScaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95) translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.picker-modal-header {
+    padding: 18px 22px;
+    border-bottom: 1px solid rgba(30, 58, 138, 0.3);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.picker-modal-title {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #f8fafc;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.picker-modal-title i {
+    color: #3b82f6;
+}
+
+.picker-modal-subtitle {
+    color: #94a3b8;
+    font-size: 0.85rem;
+    margin-top: 4px;
+}
+
+.picker-modal-subtitle strong {
+    color: #cbd5e1;
+}
+
+.picker-modal-close {
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    font-size: 1.8rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    transition: color 0.2s;
+}
+
+.picker-modal-close:hover {
+    color: #f8fafc;
+}
+
+.picker-search-container {
+    padding: 16px 22px 10px;
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.picker-search-icon {
+    position: absolute;
+    left: 36px;
+    color: #60a5fa;
+    font-size: 1rem;
+}
+
+.picker-search-input {
+    width: 100%;
+    padding: 12px 40px 12px 42px;
+    background: #020617;
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    border-radius: 12px;
+    color: #f8fafc;
+    font-size: 0.95rem;
+    outline: none;
+    transition: all 0.2s;
+}
+
+.picker-search-input:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+.picker-clear-btn {
+    position: absolute;
+    right: 34px;
+    background: transparent;
+    border: none;
+    color: #94a3b8;
+    font-size: 1.4rem;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.picker-clear-btn:hover {
+    color: #f87171;
+}
+
+.picker-results-bar {
+    padding: 0 22px 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.82rem;
+    color: #94a3b8;
+}
+
+.picker-hint {
+    color: #64748b;
+}
+
+.picker-hint kbd {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 0.75rem;
+    color: #cbd5e1;
+}
+
+.picker-list {
+    padding: 0 22px 16px;
+    overflow-y: auto;
+    max-height: 48vh;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.picker-chip-item {
+    background: #020617;
+    border: 1px solid rgba(30, 58, 138, 0.35);
+    border-radius: 12px;
+    padding: 10px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.picker-chip-item:hover {
+    background: #172554;
+    border-color: #3b82f6;
+    transform: translateX(4px);
+}
+
+.picker-chip-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.picker-chip-num {
+    font-weight: 700;
+    color: #93c5fd;
+    font-size: 1rem;
+    font-family: monospace;
+    letter-spacing: 0.5px;
+}
+
+.picker-chip-op {
+    color: #cbd5e1;
+    font-size: 0.85rem;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 2px 8px;
+    border-radius: 6px;
+}
+
+.btn-picker-select {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #fff;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+}
+
+.btn-picker-select:hover {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    box-shadow: 0 0 10px rgba(59, 130, 246, 0.4);
+}
+
+.picker-empty-state {
+    text-align: center;
+    padding: 36px 16px;
+    color: #94a3b8;
+}
+
+.picker-modal-footer {
+    padding: 12px 22px;
+    border-top: 1px solid rgba(30, 58, 138, 0.3);
+    display: flex;
+    justify-content: flex-end;
+}
+
+.btn-fechar-modal {
+    background: #1e293b;
+    color: #cbd5e1;
+    border: 1px solid #334155;
+    padding: 8px 18px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-fechar-modal:hover {
+    background: #334155;
+    color: #fff;
+}
+</style>
 
 {% endblock %}

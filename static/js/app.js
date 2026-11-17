@@ -1,188 +1,309 @@
 /* ============================================================
-   FORCE SIDEBAR CLOSED ON LOAD
-============================================================ */ 
+   SIDEBAR
+============================================================ */
 document.addEventListener("DOMContentLoaded", () => {
     const sidebar = document.getElementById("sidebar");
     const toggle = document.getElementById("sidebarToggle");
-
-    // Sidebar SEMPRE inicia fechada
-    if (sidebar && !sidebar.classList.contains("collapsed")) {
-        sidebar.classList.add("collapsed");
-    }
-
-    // Abre/fecha ao clicar no botão
-    if (toggle) {
-        toggle.addEventListener("click", () => {
-            sidebar.classList.toggle("collapsed");
-        });
-    }
-
-    // Mantém renderização dos chips funcionando
-    if (typeof renderRows === "function") {
-        renderRows(chipsData);
-    }
+    if (sidebar && !sidebar.classList.contains("collapsed")) sidebar.classList.add("collapsed");
+    toggle?.addEventListener("click", () => sidebar?.classList.toggle("collapsed"));
 });
 
 /* ============================================================
-   CHIP PANEL – JS PREMIUM (Dark Blue Integration)
+   DADOS DO BACKEND
 ============================================================ */
+const ALL_CHIPS = Array.isArray(window.chipsData) ? [...window.chipsData] : [];
+let chipsView = [...ALL_CHIPS];
+console.log("[Chips] Total recebido:", ALL_CHIPS.length);
 
-// Dados iniciais enviados pelo backend
-let chipsData = window.chipsData || [];
-let aparelhosData = window.aparelhosData || [];
+const STATUS_LIST = ["DISPONIVEL", "MATURANDO", "EM MATURAÇÃO", "MATURACAO", "MATURADO", "DESCANSO_1", "DESCANSO_2", "PRONTO_PARA_MATURAR", "DISPARANDO", "BANIDO", "RESTRINGIDO", "ATIVO", "EM_USO", "INATIVO", "BLOQUEADO", "MANUTENCAO"];
+const OPERADORAS_LIST = ["VIVO", "TIM", "CLARO", "OI", "OUTRA"];
+
+
+function normalizarStatus(status) {
+    return String(status || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .replace(/_/g, " ")
+        .trim();
+}
+function isStatusMaturando(status) {
+    return ["maturando", "em maturacao", "maturacao"].includes(normalizarStatus(status));
+}
+function calcularProgressoMaturacao(maturandoEm) {
+    if (!maturandoEm) return null;
+    const inicio = new Date(maturandoEm);
+    if (Number.isNaN(inicio.getTime())) return null;
+    const diffMs = new Date() - inicio;
+    const totalMs = 7 * 24 * 60 * 60 * 1000;
+    const progresso = Math.round((diffMs / totalMs) * 100);
+    return Math.max(0, Math.min(100, progresso));
+}
+function calcularDiasMaturacao(maturandoEm) {
+    if (!maturandoEm) return null;
+    const inicio = new Date(maturandoEm);
+    if (Number.isNaN(inicio.getTime())) return null;
+    const diffMs = new Date() - inicio;
+    const dias = Math.floor(diffMs / (24 * 60 * 60 * 1000)) + 1;
+    return Math.max(1, Math.min(7, dias));
+}
+function renderMaturacaoBar(chip) {
+    if (!isStatusMaturando(chip.status)) return '<span class="muted">—</span>';
+    const progresso = calcularProgressoMaturacao(chip.maturando_em);
+    const dias = calcularDiasMaturacao(chip.maturando_em);
+    if (progresso === null || dias === null) {
+        return '<div class="maturacao-box maturacao-warning"><span>Sem data de início</span></div>';
+    }
+    const completo = progresso >= 100;
+    return `<div class="maturacao-box">
+        <div class="maturacao-info"><strong>${progresso}%</strong><span>${completo ? "Pronto" : `Dia ${dias}/7`}</span></div>
+        <div class="maturacao-track"><div class="maturacao-fill ${completo ? "is-complete" : ""}" style="width: ${progresso}%"></div></div>
+    </div>`;
+}
+
+function formatDate(value) {
+    if (!value) return "";
+    const d = new Date(String(value).includes("T") ? value : `${value}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString().split("T")[0];
+}
+function formatBRDate(value) {
+    if (!value) return "—";
+    const d = new Date(String(value).includes("T") ? value : `${value}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("pt-BR");
+}
+function formatBRL(value) {
+    const n = Number(value || 0);
+    return n ? n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "—";
+}
+function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+}
+function setValue(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.value = value ?? "";
+}
+function notify(message, type = "info") {
+    if (typeof window.showToast === "function") window.showToast(message, type);
+    else console.log(`[${type}] ${message}`);
+}
+function showModal(id) {
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    modal.style.display = "flex";
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("modal-open");
+}
+function hideModal(id) {
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    modal.style.display = "none";
+    modal.setAttribute("aria-hidden", "true");
+    if (!document.querySelector('.modal-overlay[style*="flex"]')) document.body.classList.remove("modal-open");
+}
 
 /* ============================================================
-   BUSCA DINÂMICA
+   MODAL NOVO CHIP
 ============================================================ */
-document.getElementById("searchInput").addEventListener("input", e => {
-    const termo = e.target.value.toLowerCase();
+function openNewChipModal() {
+    const form = document.getElementById("newChipForm");
+    form?.reset();
+    showModal("newChipModal");
+    setTimeout(() => form?.querySelector('input[name="numero"]')?.focus(), 80);
+}
+function closeNewChipModal() { hideModal("newChipModal"); }
 
-    const filtrados = chipsData.filter(chip =>
-        Object.values(chip).some(val =>
-            String(val || "").toLowerCase().includes(termo)
-        )
-    );
-
-    renderRows(filtrados);
-});
+document.querySelectorAll(".open-new-chip-modal").forEach(btn => btn.addEventListener("click", openNewChipModal));
+document.getElementById("closeNewChipModal")?.addEventListener("click", closeNewChipModal);
+document.querySelector("[data-close-new-chip]")?.addEventListener("click", closeNewChipModal);
 
 /* ============================================================
-   RENDERIZA A TABELA
+   SELECTS E MODAL DE EDIÇÃO
+============================================================ */
+function preencherStatus(atual) {
+    const select = document.getElementById("modal_status");
+    if (!select) return;
+    select.innerHTML = "";
+    STATUS_LIST.forEach(s => select.appendChild(new Option(s, s, s === atual, s === atual)));
+}
+function preencherOperadoras(atual) {
+    const select = document.getElementById("modal_operadora");
+    if (!select) return;
+    select.innerHTML = "";
+    OPERADORAS_LIST.forEach(op => select.appendChild(new Option(op, op, op === atual, op === atual)));
+}
+function abrirModalEdicao(chip) {
+    showModal("editModal");
+    setValue("modal_sk_chip", chip.sk_chip);
+    setValue("modal_numero", chip.numero);
+    setValue("modal_operador", chip.operador);
+    setValue("modal_plano", chip.plano);
+    setValue("modal_observacao", chip.observacao);
+    preencherOperadoras(chip.operadora);
+    preencherStatus(chip.status);
+    const statusEl = document.getElementById("modal_status");
+    if (statusEl) {
+        statusEl.dataset.previousStatus = chip.status || "";
+        statusEl.dataset.changed = "false";
+    }
+    setValue("modal_qt_disparos", chip.qt_disparos);
+    setValue("modal_qt_banimentos", chip.qt_banimentos);
+    setValue("modal_dt_banimentos", formatDate(chip.dt_banimentos));
+    setValue("modal_data_status", formatDate(chip.data_status || chip.dt_inicio));
+    setValue("modal_tipo_whatsapp", chip.tipo_whatsapp);
+    setValue("modal_sk_aparelho_atual", chip.sk_aparelho_atual);
+    setValue("modal_slot_whatsapp", chip.slot_whatsapp);
+}
+
+function bindEditButtons() {
+    document.querySelectorAll(".edit-btn").forEach(btn => {
+        btn.onclick = async () => {
+            const sk = btn.dataset.sk;
+            if (!sk) return notify("SK inválido", "error");
+            try {
+                const res = await fetch(`/chips/sk/${sk}`);
+                if (!res.ok) return notify("Erro ao carregar chip", "error");
+                abrirModalEdicao(await res.json());
+            } catch (error) {
+                console.error("[Chips] Falha ao carregar chip", error);
+                notify("Falha de rede ao carregar chip", "error");
+            }
+        };
+    });
+}
+
+/* ============================================================
+   RENDERIZAÇÃO DA TABELA
 ============================================================ */
 function renderRows(lista) {
     const tbody = document.getElementById("tableBody");
-    tbody.innerHTML = "";
-
+    if (!tbody) return;
     if (!lista.length) {
-        tbody.innerHTML = `
-            <tr>
-                <td colspan="13" class="empty-message">Nenhum chip encontrado.</td>
-            </tr>
-        `;
+        tbody.innerHTML = `<tr><td colspan="18" class="empty-message">Nenhum chip encontrado com os filtros aplicados.</td></tr>`;
         return;
     }
-
-    lista.forEach(c => {
-        tbody.innerHTML += `
-            <tr>
-                <td>${c.id_chip || "-"}</td>
-                <td>${c.numero || "-"}</td>
-                <td>${c.operadora || "-"}</td>
-                <td>${c.operador || "-"}</td>
-
-                <td>
-                    <span class="status-badge status-${(c.status || '').toLowerCase()}">
-                        ${c.status || "-"}
-                    </span>
-                </td>
-
-                <td>${c.plano || "-"}</td>
-                <td>${c.ultima_recarga_data || "-"}</td>
-                <td>${c.ultima_recarga_valor || "-"}</td>
-                <td>${c.total_gasto || "-"}</td>
-
-                <td>${c.modelo_aparelho || "-"}</td>
-                <td>${c.dt_inicio || "-"}</td>
-
-                <td>
-                    ${c.observacao ? `
-                        <span class="obs-tooltip" data-tooltip="${c.observacao}">
-                            <i class="fa fa-comment-dots"></i>
-                        </span>
-                    ` : "-"}
-                </td>
-
-                <td>
-                    <button class="btn btn-primary btn-sm edit-btn" data-id="${c.id_chip}">
-                        Editar
-                    </button>
-                </td>
-            </tr>`;
-    });
-
+    tbody.innerHTML = lista.map(c => {
+        const status = c.status || "-";
+        const aparelho = c.aparelho_modelo ? `${escapeHtml(c.aparelho_modelo)} ${c.aparelho_marca ? '(' + escapeHtml(c.aparelho_marca) + ')' : ''}` : (c.sk_aparelho_atual ? `SK ${c.sk_aparelho_atual}` : "Sem aparelho");
+        const rowClass = String(status).toUpperCase() === "BANIDO" ? "row-danger" : (!c.sk_aparelho_atual ? "row-warning" : "");
+        return `<tr class="${rowClass}">
+            <td class="quick-actions">
+              <button class="action-btn edit-btn" title="Editar" data-sk="${c.sk_chip}"><i class="fas fa-edit"></i></button>
+              <button class="action-btn recarga-btn" title="Recarregar" data-sk="${c.sk_chip}"><i class="fas fa-bolt"></i></button>
+              <button class="action-btn banir-btn" title="Banir" data-sk="${c.sk_chip}"><i class="fas fa-ban"></i></button>
+              <button class="action-btn timeline-btn" title="Histórico" data-sk="${c.sk_chip}"><i class="fas fa-clock"></i></button>
+            </td>
+            <td>${escapeHtml(c.numero || "—")}</td>
+            <td>${escapeHtml(c.operadora || "—")}</td>
+            <td><span class="status-badge status-${String(status).toLowerCase().replace(/\s+/g, "_")}">${escapeHtml(status)}</span></td>
+            <td>${renderMaturacaoBar(c)}</td>
+            <td>${escapeHtml(c.operador || "—")}</td>
+            <td>${escapeHtml(c.plano || "—")}</td>
+            <td>${escapeHtml(c.tipo_whatsapp || "—")}${c.slot_whatsapp ? ` · Slot ${escapeHtml(c.slot_whatsapp)}` : ""}</td>
+            <td>${c.qt_disparos ?? 0}</td>
+            <td>${c.qt_banimentos ?? 0}</td>
+            <td>${formatBRDate(c.ultima_recarga_data)}<br><small>${formatBRL(c.ultima_recarga_valor)}</small></td>
+            <td>${formatBRL(c.total_gasto)}</td>
+            <td>${aparelho}</td>
+            <td>${formatBRDate(c.updated_at || c.data_status)}</td>
+            <td>${formatBRDate(c.created_at || c.dt_inicio)}</td>
+            <td class="obs-cell" title="${escapeHtml(c.observacao || '')}">${c.observacao ? escapeHtml(c.observacao) : '—'}</td>
+            <td>${escapeHtml(c.id_chip || "—")}</td>
+            <td>${c.sk_chip ?? "—"}</td>
+        </tr>`;
+    }).join("");
     bindEditButtons();
+    bindQuickActions();
 }
 
-/* ============================================================
-   VINCULA BOTÕES DE EDIÇÃO
-============================================================ */
-function bindEditButtons() {
-    document.querySelectorAll(".edit-btn").forEach(btn => {
-        btn.addEventListener("click", async () => {
-            const id = btn.dataset.id;
-            await abrirModalEdicao(id);
-        });
+function bindQuickActions() {
+    document.querySelectorAll(".recarga-btn").forEach(btn => btn.onclick = async () => {
+        const valor = prompt("Valor da recarga (R$):");
+        if (!valor) return;
+        btn.disabled = true;
+        try {
+            const res = await fetch("/chips/recarga", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({sk_chip:Number(btn.dataset.sk), valor}) });
+            const out = await res.json();
+            if (out.success) { notify("Recarga registrada com sucesso", "success"); setTimeout(() => location.reload(), 500); }
+            else { notify(out.error || "Erro ao recarregar", "error"); btn.disabled = false; }
+        } catch (e) { notify("Falha de rede ao recarregar", "error"); btn.disabled = false; }
+    });
+    document.querySelectorAll(".banir-btn").forEach(btn => btn.onclick = async () => {
+        if (!confirm("Confirmar banimento deste chip?")) return;
+        btn.disabled = true;
+        try {
+            const res = await fetch("/chips/banir", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({sk_chip:Number(btn.dataset.sk)}) });
+            const out = await res.json();
+            if (out.success) { notify("Chip banido", "success"); setTimeout(() => location.reload(), 500); }
+            else { notify(out.error || "Erro ao banir", "error"); btn.disabled = false; }
+        } catch (e) { notify("Falha de rede ao banir", "error"); btn.disabled = false; }
+    });
+    document.querySelectorAll(".timeline-btn").forEach(btn => btn.onclick = async () => {
+        try {
+            const res = await fetch(`/chips/timeline/${btn.dataset.sk}`);
+            const items = await res.json();
+            const box = document.getElementById("timelineContent");
+            if (box) box.innerHTML = items.length ? items.map(i => `<div class="timeline-item"><strong>${escapeHtml(i.tipo_evento || 'EVENTO')}</strong><span>${formatBRDate(i.data_evento || i.created_at)}</span><p>${escapeHtml(i.observacao || '')}</p><small>${escapeHtml(i.origem || '')}</small></div>`).join("") : "<p>Nenhum histórico encontrado.</p>";
+            showModal("timelineModal");
+        } catch (e) { notify("Falha ao carregar histórico", "error"); }
     });
 }
 
 /* ============================================================
-   ABRIR MODAL + CARREGAR DADOS
+   FECHAR / SALVAR
 ============================================================ */
-async function abrirModalEdicao(id_chip) {
-    const res = await fetch(`/chips/${id_chip}`);
-    const chip = await res.json();
+function closeEditModal() { hideModal("editModal"); }
+document.getElementById("modalCloseBtn")?.addEventListener("click", closeEditModal);
+document.getElementById("modalXCloseBtn")?.addEventListener("click", closeEditModal);
+document.getElementById("timelineCloseBtn")?.addEventListener("click", () => hideModal("timelineModal"));
 
-    if (!chip) return alert("Erro ao carregar dados!");
-
-    document.getElementById("editModal").style.display = "flex";
-
-    setValue("modal_id_chip", chip.id_chip);
-    setValue("modal_numero", chip.numero);
-    setValue("modal_operadora", chip.operadora);
-    setValue("modal_operador", chip.operador);
-    setValue("modal_status", chip.status);
-    setValue("modal_plano", chip.plano);
-
-    setValue("modal_dt_inicio", chip.dt_inicio);
-    setValue("modal_ultima_recarga_data", chip.ultima_recarga_data);
-    setValue("modal_ultima_recarga_valor", chip.ultima_recarga_valor);
-    setValue("modal_total_gasto", chip.total_gasto);
-
-    setValue("modal_observacao", chip.observacao);
-
-    const selectAp = document.getElementById("modal_sk_aparelho_atual");
-    selectAp.innerHTML = `<option value="">— Nenhum —</option>`;
-
-    aparelhosData.forEach(ap => {
-        const opt = document.createElement("option");
-        opt.value = ap.sk_aparelho;
-        opt.textContent = `${ap.modelo} (${ap.marca})`;
-
-        if (chip.sk_aparelho_atual == ap.sk_aparelho) opt.selected = true;
-        selectAp.appendChild(opt);
-    });
-}
-
-function setValue(id, value) {
-    const el = document.getElementById(id);
-    if (el) el.value = value || "";
-}
-
-/* ============================================================
-   FECHAR MODAL
-============================================================ */
-document.getElementById("modalCloseBtn").addEventListener("click", () => {
-    document.getElementById("editModal").style.display = "none";
-});
-
-/* ============================================================
-   SALVAR ALTERAÇÕES
-============================================================ */
-document.getElementById("modalSaveBtn").addEventListener("click", async () => {
-    const formData = Object.fromEntries(new FormData(document.getElementById("modalForm")));
-
-    const res = await fetch("/chips/update-json", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData)
-    });
-
-    const r = await res.json();
-
-    if (r.success) {
-        alert("Alterações salvas com sucesso!");
-        location.reload();
-    } else {
-        alert(r.error || "Erro ao salvar.");
+document.getElementById("modalSaveBtn")?.addEventListener("click", async () => {
+    const btn = document.getElementById("modalSaveBtn");
+    const oldText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = 'Salvando <span class="spinner"></span>';
+    const data = {};
+    new FormData(document.getElementById("modalForm")).forEach((value, key) => { data[key] = value === "" ? null : value; });
+    data.sk_chip = Number(document.getElementById("modal_sk_chip").value);
+    data.status = document.getElementById("modal_status").value;
+    data.qt_disparos = Number(document.getElementById("modal_qt_disparos").value || 0);
+    data.qt_banimentos = Number(document.getElementById("modal_qt_banimentos").value || 0);
+    const statusAnterior = document.getElementById("modal_status").dataset.previousStatus || "";
+    if (data.status !== statusAnterior && ["BANIDO", "BLOQUEADO", "RESTRINGIDO"].includes(data.status) && !window.confirm(`Confirmar alteração de status para "${data.status}"?`)) {
+        btn.disabled = false; btn.innerHTML = oldText; return;
+    }
+    try {
+        const res = await fetch("/chips/update-json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+        const r = await res.json();
+        if (r.success) { notify("Chip atualizado com sucesso", "success"); setTimeout(() => location.reload(), 400); }
+        else notify(r.error || "Erro ao salvar", "error");
+    } catch (e) {
+        console.error("[Chips] Erro ao salvar", e);
+        notify("Falha de rede ao salvar", "error");
+    } finally {
+        btn.disabled = false; btn.innerHTML = oldText;
     }
 });
+
+document.getElementById("searchInput")?.addEventListener("input", e => executarBusca(e.target.value.toLowerCase().trim()));
+function executarBusca(termo) {
+    chipsView = !termo ? [...ALL_CHIPS] : ALL_CHIPS.filter(c => Object.values(c).some(v => String(v ?? "").toLowerCase().includes(termo)));
+    renderRows(chipsView);
+}
+
+document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    closeNewChipModal();
+    closeEditModal();
+    hideModal("timelineModal");
+});
+document.querySelectorAll(".modal-overlay").forEach(modal => {
+    modal.addEventListener("click", event => {
+        if (event.target !== modal) return;
+        if (modal.id === "newChipModal") closeNewChipModal();
+        else hideModal(modal.id);
+    });
+});
+
+const modalStatusEl = document.getElementById("modal_status");
+modalStatusEl?.addEventListener("change", () => { modalStatusEl.dataset.changed = "true"; });
+renderRows(ALL_CHIPS);

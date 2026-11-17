@@ -1,0 +1,5 @@
+database:
+  schema: chips
+views:
+  chips: vw_chips_painel
+  aparelhos: vw_aparelhos

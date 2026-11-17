@@ -1,94 +1,157 @@
+# routes/dashboard.py
 # -*- coding: utf-8 -*-
 
-from flask import Blueprint, render_template, session, redirect
-from utils.db import db_query, db_execute
+from flask import Blueprint, render_template
+from collections import Counter
 
+from utils.postgres_client import PostgresClient
+from utils.sanitizer import sanitize_df
 
 bp_dashboard = Blueprint("dashboard", __name__)
 
-# ===============================================================
-# ROTA DO DASHBOARD (SAAS)
-# ===============================================================
+bq = PostgresClient()
+
+
 @bp_dashboard.route("/")
 @bp_dashboard.route("/dashboard")
 def dashboard():
 
-    # Bloqueia acesso sem login
-    if "id_empresa" not in session:
-        return redirect("/")
-
-    id_empresa = session["id_empresa"]
-
-    # -----------------------------------------------------------
-    # 1) Carregar chips (equivalente à antiga view vw_chips_painel)
-    # -----------------------------------------------------------
-    chips = db_query("""
-        SELECT 
-            c.id_chip,
+    # ===========================================================
+    # QUERY PRINCIPAL — CONTRATO 100% COMPATÍVEL COM O HTML
+    # ===========================================================
+    sql = f"""
+        SELECT
             c.numero,
             c.operadora,
-            c.operador,
-            c.status,
             c.plano,
-            c.dt_inicio,
-            c.ultima_recarga_valor,
+            c.status,
             c.ultima_recarga_data,
-            c.total_gasto,
-            a.modelo AS modelo_aparelho,
-            a.marca AS marca_aparelho
-        FROM chips c
-        LEFT JOIN aparelhos a
-            ON a.id_aparelho = c.id_aparelho_atual
-        WHERE c.id_empresa = %s
-        ORDER BY c.numero ASC
-    """, (id_empresa,))
+            c.qt_disparos,
 
-    # Convertendo para lista simples (já vem como dict)
-    tabela = chips
+            -- CAMPOS QUE O HTML ESPERA
+            a.marca  AS marca_aparelho,
+            a.modelo AS modelo_aparelho
 
-    # -----------------------------------------------------------
-    # 2) KPIs
-    # -----------------------------------------------------------
+        FROM {bq.table('vw_chips_painel_dashboard')} c
+        LEFT JOIN {bq.table('dim_aparelho')} a
+            ON a.sk_aparelho = c.sk_aparelho_atual
+        ORDER BY c.numero
+    """
+
+    df = sanitize_df(bq.run_df(sql))
+    tabela = df.to_dict(orient="records")
+
+    # ===========================================================
+    # KPIs
+    # ===========================================================
     total_chips = len(tabela)
-    chips_ativos = len([x for x in tabela if (x.get("status") or "").upper() == "ATIVO"])
-    disparando = len([x for x in tabela if (x.get("status") or "").upper() == "DISPARANDO"])
-    banidos = len([x for x in tabela if (x.get("status") or "").upper() == "BANIDO"])
 
-    # -----------------------------------------------------------
-    # 3) FILTROS / GRÁFICOS
-    # -----------------------------------------------------------
-    lista_status = sorted({ (x.get("status") or "").upper() for x in tabela if x.get("status") })
-    lista_operadora = sorted({ x.get("operadora") for x in tabela if x.get("operadora") })
+    chips_ativos = sum(
+        1 for x in tabela
+        if (x.get("status") or "").strip().upper() == "ATIVO"
+    )
 
-    # -----------------------------------------------------------
-    # 4) ALERTAS - chips sem recarga > 80 dias
-    # -----------------------------------------------------------
-    alerta = db_query("""
+    disparando = sum(
+        1 for x in tabela
+        if (x.get("status") or "").strip().upper() == "DISPARANDO"
+    )
+
+    banidos = sum(
+        1 for x in tabela
+        if (x.get("status") or "").strip().upper() == "BANIDO"
+    )
+
+    # ===========================================================
+    # CONTAGEM POR STATUS (SUBSTITUI GRÁFICOS)
+    # ===========================================================
+    status_counts_raw = Counter(
+        (x.get("status") or "SEM STATUS").strip().upper()
+        for x in tabela
+    )
+
+    # Ordem "inteligente" (você pode ajustar como quiser)
+    status_order = [
+        "ATIVO",
+        "DISPARANDO",
+        "MATURANDO",
+        "DISPONIVEL",
+        "DISPONÍVEL",
+        "RESTRINGIDO",
+        "BANIDO",
+        "CANCELADO",
+        "INATIVO",
+        "SEM STATUS",
+    ]
+
+    # Monta dict final respeitando a ordem definida e depois adiciona os "extras"
+    status_counts = {}
+
+    # 1) Primeiro, os da ordem (se existirem)
+    for st in status_order:
+        if st in status_counts_raw:
+            status_counts[st] = int(status_counts_raw[st])
+
+    # 2) Depois, qualquer outro status que apareça no banco (não previsto na ordem)
+    extras = sorted(
+        [k for k in status_counts_raw.keys() if k not in status_counts],
+        key=lambda s: (-status_counts_raw[s], s)
+    )
+
+    for st in extras:
+        status_counts[st] = int(status_counts_raw[st])
+
+    # ===========================================================
+    # FILTROS
+    # ===========================================================
+    lista_status = sorted({
+        (x.get("status") or "").strip().upper()
+        for x in tabela
+        if (x.get("status") or "").strip()
+    })
+
+    lista_operadora = sorted({
+        (x.get("operadora") or "").strip()
+        for x in tabela
+        if (x.get("operadora") or "").strip()
+    })
+
+    # ===========================================================
+    # ALERTAS — > 80 DIAS SEM RECARGA
+    # ===========================================================
+    alerta_sql = f"""
         SELECT
-            numero,
-            status,
-            operadora,
-            ultima_recarga_data,
-            EXTRACT(DAY FROM CURRENT_DATE - ultima_recarga_data) AS dias
-        FROM chips
-        WHERE id_empresa = %s
-          AND ultima_recarga_data IS NOT NULL
-          AND CURRENT_DATE - ultima_recarga_data > INTERVAL '80 days'
-        ORDER BY dias DESC
-    """, (id_empresa,))
+            c.numero,
+            c.status,
+            c.operadora,
+            c.ultima_recarga_data,
+            (CURRENT_DATE - c.ultima_recarga_data::date) AS dias_sem_recarga
+        FROM {bq.table('vw_chips_painel_dashboard')} c
+        WHERE c.ultima_recarga_data IS NOT NULL
+          AND (CURRENT_DATE - c.ultima_recarga_data::date) > 80
+        ORDER BY dias_sem_recarga DESC
+    """
 
-    qtd_alerta = len(alerta)
+    alerta_df = sanitize_df(bq.run_df(alerta_sql))
+    alerta_recarga = alerta_df.to_dict(orient="records")
 
-    # -----------------------------------------------------------
-    # 5) RENDERIZAÇÃO
-    # -----------------------------------------------------------
+    # ===========================================================
+    # RANKING — TOP 10 CHIPS POR QUANTIDADE DE DISPAROS
+    # ===========================================================
+
+    ranking_disparos = sorted(
+        tabela,
+        key=lambda x: int(x.get("qt_disparos") or 0),
+        reverse=True
+    )[:10]
+
+    # ===========================================================
+    # RENDER
+    # ===========================================================
     return render_template(
         "dashboard.html",
 
-        # tabela principal
         tabela=tabela,
 
-        # KPIs
         total_chips=total_chips,
         chips_ativos=chips_ativos,
         disparando=disparando,
@@ -99,7 +162,18 @@ def dashboard():
         lista_operadora=lista_operadora,
 
         # alertas
-        alerta_recarga=alerta,
-        qtd_alerta=qtd_alerta,
+        alerta_recarga=alerta_recarga,
+        qtd_alerta=len(alerta_recarga),
+
+        # NOVO: cards numéricos por status
+        status_counts=status_counts,
+        status_order=status_order,
+
+        ranking_disparos=ranking_disparos,
     )
+
+
+
+
+
 

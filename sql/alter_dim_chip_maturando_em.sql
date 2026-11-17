@@ -1,0 +1,1 @@
+ALTER TABLE chips.dim_chip ADD COLUMN IF NOT EXISTS maturando_em TIMESTAMPTZ;
