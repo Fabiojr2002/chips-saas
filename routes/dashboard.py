@@ -72,16 +72,15 @@ def dashboard():
     # Ordem "inteligente" (você pode ajustar como quiser)
     status_order = [
         "ATIVO",
-        "DISPARANDO",
+        "EM_USO",
         "MATURANDO",
-        "DISPONIVEL",
+        "MATURADO",
         "DISPONÍVEL",
-        "SEM SALDO",
+        "DESCANSO",
+        "SEM_SALDO",
         "RESTRINGIDO",
+        "BLOQUEADO",
         "BANIDO",
-        "CANCELADO",
-        "INATIVO",
-        "SEM STATUS",
     ]
 
     # Monta dict final respeitando a ordem definida e depois adiciona os "extras"

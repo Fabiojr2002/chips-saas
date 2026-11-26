@@ -450,7 +450,7 @@
                 <td>{{ r.operadora }}</td>
                 <td>{{ r.plano }}</td>
                 <td>
-                    <span class="status status-{{ (r.status or '')|lower|replace(' ','_') }}">
+                    <span class="status status-{{ (r.status or '')|lower|replace(' ','_')|replace('í','i')|replace('ç','c')|replace('ã','a') }}">
                         {{ r.status }}
                     </span>
                 </td>

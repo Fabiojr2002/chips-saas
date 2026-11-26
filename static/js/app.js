@@ -15,7 +15,12 @@ const ALL_CHIPS = Array.isArray(window.chipsData) ? [...window.chipsData] : [];
 let chipsView = [...ALL_CHIPS];
 console.log("[Chips] Total recebido:", ALL_CHIPS.length);
 
-const STATUS_LIST = ["DISPONIVEL", "MATURANDO", "EM MATURAÇÃO", "MATURACAO", "MATURADO", "DESCANSO_1", "DESCANSO_2", "PRONTO_PARA_MATURAR", "DISPARANDO", "SEM SALDO", "BANIDO", "RESTRINGIDO", "ATIVO", "EM_USO", "INATIVO", "BLOQUEADO", "MANUTENCAO"];
+const STATUS_LIST = ["ATIVO", "EM_USO", "MATURANDO", "MATURADO", "DISPONÍVEL", "DESCANSO", "SEM_SALDO", "RESTRINGIDO", "BLOQUEADO", "BANIDO"];
+const STATUS_ALIASES = { "DISPONIVEL": "DISPONÍVEL", "SEM SALDO": "SEM_SALDO" };
+function canonicalStatus(status) {
+    const raw = String(status || "").trim();
+    return STATUS_ALIASES[raw.toUpperCase()] || raw;
+}
 const OPERADORAS_LIST = ["VIVO", "TIM", "CLARO", "OI", "OUTRA"];
 
 
@@ -122,8 +127,13 @@ document.querySelector("[data-close-new-chip]")?.addEventListener("click", close
 function preencherStatus(atual) {
     const select = document.getElementById("modal_status");
     if (!select) return;
+    const statusAtual = canonicalStatus(atual);
     select.innerHTML = "";
-    STATUS_LIST.forEach(s => select.appendChild(new Option(s, s, s === atual, s === atual)));
+    if (statusAtual && !STATUS_LIST.includes(statusAtual)) {
+        const legacyOpt = new Option(`${statusAtual} (atual)`, statusAtual, true, true);
+        select.appendChild(legacyOpt);
+    }
+    STATUS_LIST.forEach(s => select.appendChild(new Option(s, s, s === statusAtual, s === statusAtual)));
 }
 function preencherOperadoras(atual) {
     const select = document.getElementById("modal_operadora");
@@ -194,7 +204,7 @@ function renderRows(lista) {
             </td>
             <td>${escapeHtml(c.numero || "—")}</td>
             <td>${escapeHtml(c.operadora || "—")}</td>
-            <td><span class="status-badge status-${String(status).toLowerCase().replace(/\s+/g, "_")}">${escapeHtml(status)}</span></td>
+            <td><span class="status-badge status-${normalizarStatus(status).replace(/\s+/g, "_")}">${escapeHtml(status)}</span></td>
             <td>${renderMaturacaoBar(c)}</td>
             <td>${escapeHtml(c.operador || "—")}</td>
             <td>${escapeHtml(c.plano || "—")}</td>

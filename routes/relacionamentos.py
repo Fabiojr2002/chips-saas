@@ -11,22 +11,29 @@ relacionamentos_bp = Blueprint("relacionamentos", __name__)
 bq = PostgresClient()
 
 STATUS_OPCOES = [
-    "DISPARANDO",
-    "MATURANDO",
-    "BANIDO",
-    "SEM SALDO",
     "ATIVO",
-    "DISPONIVEL",
-    "MATURADO",
-    "DESCANSO_1",
-    "DESCANSO_2",
-    "PRONTO_PARA_MATURAR",
     "EM_USO",
+    "MATURANDO",
+    "MATURADO",
+    "DISPONÍVEL",
+    "DESCANSO",
+    "SEM_SALDO",
     "RESTRINGIDO",
     "BLOQUEADO",
-    "MANUTENCAO",
-    "INATIVO",
+    "BANIDO",
 ]
+
+STATUS_ALIASES = {
+    "DISPONIVEL": "DISPONÍVEL",
+    "SEM SALDO": "SEM_SALDO",
+}
+
+
+def canonical_status(value, default="DISPONÍVEL"):
+    if is_null(value):
+        return default
+    raw = str(value).strip()
+    return STATUS_ALIASES.get(raw.upper(), raw)
 
 
 def to_int(v):
@@ -79,7 +86,7 @@ def relacionamentos_home():
                     continue
                 ap_atual = to_int(r.get("sk_aparelho_atual"))
                 st = r.get("status")
-                status_clean = str(st).strip() if not is_null(st) else "DISPONIVEL"
+                status_clean = canonical_status(st, "DISPONÍVEL")
                 if ap_atual is None:
                     chips_livres.append({
                         "sk_chip": sk,
@@ -210,9 +217,11 @@ def relacionamentos_atualizar_status():
     try:
         data = request.get_json(force=True) or {}
         sk_chip = to_int(data.get("sk_chip"))
-        novo_status = str(data.get("status") or "").strip()
+        novo_status = canonical_status(data.get("status"), "")
         if not sk_chip or not novo_status:
             return jsonify({"ok": False, "error": "sk_chip e status são obrigatórios"}), 400
+        if novo_status not in STATUS_OPCOES:
+            return jsonify({"ok": False, "error": f"Status inválido: {novo_status}"}), 400
 
         has_maturando = ensure_maturando_em_column()
         with bq.engine.begin() as conn:

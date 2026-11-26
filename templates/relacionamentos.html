@@ -93,7 +93,7 @@
             <!-- ===== SLOT OCUPADO ===== -->
             {% if slot.chip %}
             {% set chip_tipo = (slot.chip.tipo_whatsapp or 'NORMAL')|upper %}
-            {% set chip_status = (slot.chip.status or 'DISPONIVEL')|trim %}
+            {% set chip_status = (slot.chip.status or 'DISPONÍVEL')|trim %}
             {% set chip_status_slug = chip_status|lower|replace(' ', '_')|replace('ç', 'c')|replace('ã', 'a')|replace('á', 'a')|replace('é', 'e')|replace('í', 'i')|replace('ó', 'o')|replace('ú', 'u') %}
             <div class="chip-info">
 
@@ -114,7 +114,7 @@
                             aria-label="Status do chip {{ slot.chip.numero }}"
                             onchange="atualizarStatusChip(this, {{ slot.chip.sk_chip }})">
                         {% if chip_status|upper not in status_opcoes %}
-                        <option value="{{ chip_status }}" selected>{{ chip_status }}</option>
+                        <option value="{{ chip_status }}" selected disabled>{{ chip_status }} (atual)</option>
                         {% endif %}
                         {% for st in status_opcoes %}
                         <option value="{{ st }}" {% if chip_status|upper == st|upper %}selected{% endif %}>{{ st }}</option>

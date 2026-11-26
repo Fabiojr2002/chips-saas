@@ -194,7 +194,16 @@ def chips_list():
             digits = only_digits(q)
             if digits: params["q_digits"] = f"%{digits}%"; parts.append("regexp_replace(COALESCE(numero,''), '[^0-9]', '', 'g') LIKE :q_digits")
             where.append(f"({' OR '.join(parts)})")
-        for name, col in {"status":"status","operadora":"operadora","plano":"plano","operador":"operador","responsavel":"operador","tipo_whatsapp":"tipo_whatsapp"}.items():
+        if filters.get("status"):
+            st_norm = normalize_status(filters["status"])
+            if st_norm == "disponivel":
+                where.append("LOWER(COALESCE(status,'')) IN ('disponivel', 'disponível')")
+            elif st_norm == "sem saldo":
+                where.append("LOWER(COALESCE(status,'')) IN ('sem_saldo', 'sem saldo')")
+            else:
+                where.append("LOWER(COALESCE(status,'')) = :status")
+                params["status"] = filters["status"].lower()
+        for name, col in {"operadora":"operadora","plano":"plano","operador":"operador","responsavel":"operador","tipo_whatsapp":"tipo_whatsapp"}.items():
             if filters.get(name): where.append(f"LOWER(COALESCE({col},'')) = :{name}"); params[name] = filters[name].lower()
         if filters.get("aparelho"): where.append("sk_aparelho_atual::text = :aparelho"); params["aparelho"] = filters["aparelho"]
         if filters.get("ativo") in ["true", "false"]: where.append("COALESCE(ativo, TRUE) = :ativo"); params["ativo"] = filters["ativo"] == "true"
@@ -211,7 +220,7 @@ def chips_list():
         total = int(chips_df["total_count"].iloc[0]) if not chips_df.empty and "total_count" in chips_df else 0
         chips_records = chips_df.drop(columns=["total_count"], errors="ignore").to_dict("records")
         aparelhos = sanitize_df(bq.run_df(f"SELECT sk_aparelho, marca, modelo FROM {bq.table('dim_aparelho')} ORDER BY marca, modelo LIMIT 500")).to_dict("records")
-        stats = {"total": total, "ativos": sum(1 for c in chips_records if c.get("ativo") is True or str(c.get("status") or "").upper()=="ATIVO"), "inativos": sum(1 for c in chips_records if c.get("ativo") is False or str(c.get("status") or "").upper()=="INATIVO"), "banidos": sum(1 for c in chips_records if str(c.get("status") or "").upper()=="BANIDO"), "disponiveis": sum(1 for c in chips_records if str(c.get("status") or "").upper() in ["DISPONIVEL","DISPONÍVEL"]), "em_uso": sum(1 for c in chips_records if str(c.get("status") or "").upper() in ["EM_USO","EM USO","ATIVO"]), "com_problema": sum(1 for c in chips_records if str(c.get("status") or "").upper() in ["BANIDO","BLOQUEADO","RESTRINGIDO","MANUTENCAO"]), "sem_aparelho": sum(1 for c in chips_records if not c.get("sk_aparelho_atual")), "vinculados": sum(1 for c in chips_records if c.get("sk_aparelho_atual")), "precisam_recarga": sum(1 for c in chips_records if not c.get("ultima_recarga_data")), "maturando": sum(1 for c in chips_records if is_status_maturando(c.get("status"))), "maturacao_concluida": sum(1 for c in chips_records if is_status_maturando(c.get("status")) and maturacao_concluida(c.get("maturando_em"))), "total_gasto": sum(float(c.get("total_gasto") or 0) for c in chips_records)}
+        stats = {"total": total, "ativos": sum(1 for c in chips_records if str(c.get("status") or "").upper()=="ATIVO"), "descanso": sum(1 for c in chips_records if str(c.get("status") or "").upper().startswith("DESCANSO")), "sem_saldo": sum(1 for c in chips_records if str(c.get("status") or "").upper() in ["SEM_SALDO","SEM SALDO"]), "inativos": sum(1 for c in chips_records if c.get("ativo") is False or str(c.get("status") or "").upper()=="INATIVO"), "banidos": sum(1 for c in chips_records if str(c.get("status") or "").upper()=="BANIDO"), "disponiveis": sum(1 for c in chips_records if str(c.get("status") or "").upper() in ["DISPONIVEL","DISPONÍVEL"]), "em_uso": sum(1 for c in chips_records if str(c.get("status") or "").upper() in ["EM_USO","EM USO","ATIVO"]), "com_problema": sum(1 for c in chips_records if str(c.get("status") or "").upper() in ["BANIDO","BLOQUEADO","RESTRINGIDO"]), "sem_aparelho": sum(1 for c in chips_records if not c.get("sk_aparelho_atual")), "vinculados": sum(1 for c in chips_records if c.get("sk_aparelho_atual")), "precisam_recarga": sum(1 for c in chips_records if not c.get("ultima_recarga_data")), "maturando": sum(1 for c in chips_records if is_status_maturando(c.get("status"))), "maturacao_concluida": sum(1 for c in chips_records if is_status_maturando(c.get("status")) and maturacao_concluida(c.get("maturando_em"))), "total_gasto": sum(float(c.get("total_gasto") or 0) for c in chips_records)}
         print(f"[Chips] Registros retornados={len(chips_records)} total={total} tempo_ms={round((time.perf_counter()-started)*1000,1)}")
         return render_template("chips.html", chips=chips_records, aparelhos=aparelhos, page=page, per_page=per_page, total=total, filters=filters, stats=stats, loading=False)
     except Exception as e:
