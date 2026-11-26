@@ -51,20 +51,13 @@ def sort_key_aparelho(a):
     return (1, 999999, texto.lower())
 
 
-def insert_event(conn, sk_chip, tipo, obs, campo=None, valor_antigo=None, valor_novo=None):
+def insert_event(conn, sk_chip, tipo, obs):
     conn.execute(text(f"""
         INSERT INTO {bq.table('f_chip_evento')}
-        (sk_evento, sk_chip, data_evento, tipo_evento, campo, valor_antigo, valor_novo, origem, observacao, created_at, categoria)
+        (sk_evento, sk_chip, data_evento, tipo_evento, origem, observacao, created_at, categoria)
         VALUES ((SELECT COALESCE(MAX(sk_evento),0)+1 FROM {bq.table('f_chip_evento')}), :sk_chip,
-                CURRENT_TIMESTAMP, :tipo, :campo, :valor_antigo, :valor_novo, 'Painel', :obs, CURRENT_TIMESTAMP, 'APARELHO')
-    """), {
-        "sk_chip": sk_chip,
-        "tipo": tipo,
-        "campo": campo,
-        "valor_antigo": valor_antigo,
-        "valor_novo": valor_novo,
-        "obs": obs,
-    })
+                CURRENT_TIMESTAMP, :tipo, 'Painel', :obs, CURRENT_TIMESTAMP, 'APARELHO')
+    """), {"sk_chip": sk_chip, "tipo": tipo, "obs": obs})
 
 
 @relacionamentos_bp.route("/relacionamentos")
@@ -208,9 +201,6 @@ def relacionamentos_atualizar_status():
                 sk_chip,
                 "ALTERACAO_STATUS",
                 f"Status alterado de {status_anterior or 'N/A'} para {novo_status} (Relacionamentos)",
-                campo="status",
-                valor_antigo=status_anterior,
-                valor_novo=novo_status,
             )
 
         return jsonify({"ok": True, "sk_chip": sk_chip, "status": novo_status})
@@ -254,9 +244,6 @@ def relacionamentos_atualizar_tipo_whatsapp():
                 sk_chip,
                 "ALTERACAO_TIPO_WHATSAPP",
                 f"Tipo WhatsApp alterado de {tipo_anterior or 'N/A'} para {novo_tipo} (Relacionamentos)",
-                campo="tipo_whatsapp",
-                valor_antigo=tipo_anterior or None,
-                valor_novo=novo_tipo,
             )
 
         return jsonify({"ok": True, "sk_chip": sk_chip, "tipo_whatsapp": novo_tipo})
