@@ -92,6 +92,9 @@
 
             <!-- ===== SLOT OCUPADO ===== -->
             {% if slot.chip %}
+            {% set chip_tipo = (slot.chip.tipo_whatsapp or 'NORMAL')|upper %}
+            {% set chip_status = (slot.chip.status or 'DISPONIVEL')|trim %}
+            {% set chip_status_slug = chip_status|lower|replace(' ', '_')|replace('ç', 'c')|replace('ã', 'a')|replace('á', 'a')|replace('é', 'e')|replace('í', 'i')|replace('ó', 'o')|replace('ú', 'u') %}
             <div class="chip-info">
 
                 <div class="chip-number">
@@ -102,16 +105,39 @@
                     {{ slot.chip.operadora }}
                 </div>
 
-                {% if slot.chip.tipo_whatsapp %}
-                <span class="badge {{ 'badge-business' if slot.chip.tipo_whatsapp == 'BUSINESS' else 'badge-normal' }}">
-                    {{ slot.chip.tipo_whatsapp }}
-                </span>
-                {% endif %}
+                <div class="chip-status-box">
+                    <label class="chip-status-label" for="status-chip-{{ slot.chip.sk_chip }}">Status</label>
+                    <select id="status-chip-{{ slot.chip.sk_chip }}"
+                            class="chip-status-select status-select-{{ chip_status_slug }}"
+                            data-sk-chip="{{ slot.chip.sk_chip }}"
+                            data-prev-status="{{ chip_status }}"
+                            aria-label="Status do chip {{ slot.chip.numero }}"
+                            onchange="atualizarStatusChip(this, {{ slot.chip.sk_chip }})">
+                        {% if chip_status|upper not in status_opcoes %}
+                        <option value="{{ chip_status }}" selected>{{ chip_status }}</option>
+                        {% endif %}
+                        {% for st in status_opcoes %}
+                        <option value="{{ st }}" {% if chip_status|upper == st|upper %}selected{% endif %}>{{ st }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-                <button class="btn-remove"
-                        onclick="desvincular({{ slot.chip.sk_chip }})">
-                    <i class="fas fa-times"></i> Remover
-                </button>
+                <div class="chip-actions-row">
+                    <button type="button"
+                            class="badge badge-toggle {{ 'badge-business' if chip_tipo == 'BUSINESS' else 'badge-normal' }}"
+                            data-sk-chip="{{ slot.chip.sk_chip }}"
+                            data-tipo="{{ chip_tipo }}"
+                            title="Clique para mudar para {{ 'NORMAL' if chip_tipo == 'BUSINESS' else 'BUSINESS' }}"
+                            onclick="alternarTipoWhatsapp(this, {{ slot.chip.sk_chip }})">
+                        <span class="badge-toggle-text">{{ chip_tipo }}</span>
+                    </button>
+
+                    <button type="button"
+                            class="btn-remove"
+                            onclick="desvincular({{ slot.chip.sk_chip }})">
+                        <i class="fas fa-times"></i> Remover
+                    </button>
+                </div>
 
             </div>
             {% else %}
@@ -453,6 +479,109 @@ function desvincular(sk_chip) {
     .catch(() => alert("Erro ao desvincular chip."));
 }
 
+// ==========================================
+// 3. RECURSO: ATUALIZAR STATUS E TIPO WHATSAPP NO CARD
+// ==========================================
+function notificarRelacionamento(msg, tipo = "success") {
+    if (typeof window.showToast === "function") {
+        window.showToast(msg, tipo);
+    } else if (tipo === "error") {
+        alert(msg);
+    }
+}
+
+function normalizarStatusSlug(status) {
+    return String(status || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, "_");
+}
+
+function aplicarClasseStatusSelect(selectEl, status) {
+    Array.from(selectEl.classList)
+        .filter(c => c.startsWith("status-select-"))
+        .forEach(c => selectEl.classList.remove(c));
+    const slug = normalizarStatusSlug(status);
+    if (slug) {
+        selectEl.classList.add(`status-select-${slug}`);
+    }
+}
+
+async function atualizarStatusChip(selectEl, sk_chip) {
+    const novoStatus = selectEl.value;
+    const statusAnterior = selectEl.dataset.prevStatus || "";
+    if (!novoStatus || novoStatus === statusAnterior) return;
+
+    selectEl.disabled = true;
+    aplicarClasseStatusSelect(selectEl, novoStatus);
+
+    try {
+        const res = await fetch("/relacionamentos/atualizar-status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                sk_chip: Number(sk_chip),
+                status: novoStatus
+            })
+        });
+        const resp = await res.json();
+        if (!res.ok || !resp.ok) {
+            throw new Error(resp.error || "Erro ao atualizar status");
+        }
+        selectEl.dataset.prevStatus = resp.status || novoStatus;
+        aplicarClasseStatusSelect(selectEl, selectEl.dataset.prevStatus);
+        notificarRelacionamento(`Status atualizado para ${selectEl.dataset.prevStatus}`, "success");
+    } catch (err) {
+        selectEl.value = statusAnterior;
+        aplicarClasseStatusSelect(selectEl, statusAnterior);
+        notificarRelacionamento(err.message || "Erro ao atualizar status do chip.", "error");
+    } finally {
+        selectEl.disabled = false;
+    }
+}
+
+async function alternarTipoWhatsapp(btnEl, sk_chip) {
+    const tipoAtual = String(btnEl.dataset.tipo || "NORMAL").toUpperCase();
+    const novoTipo = tipoAtual === "BUSINESS" ? "NORMAL" : "BUSINESS";
+    const textEl = btnEl.querySelector(".badge-toggle-text");
+
+    btnEl.disabled = true;
+    btnEl.classList.add("is-loading");
+
+    try {
+        const res = await fetch("/relacionamentos/atualizar-tipo-whatsapp", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                sk_chip: Number(sk_chip),
+                tipo_whatsapp: novoTipo
+            })
+        });
+        const resp = await res.json();
+        if (!res.ok || !resp.ok) {
+            throw new Error(resp.error || "Erro ao alterar tipo de WhatsApp");
+        }
+        const tipoFinal = String(resp.tipo_whatsapp || novoTipo).toUpperCase();
+        btnEl.dataset.tipo = tipoFinal;
+        btnEl.classList.remove("badge-business", "badge-normal");
+        btnEl.classList.add(tipoFinal === "BUSINESS" ? "badge-business" : "badge-normal");
+        btnEl.title = `Clique para mudar para ${tipoFinal === "BUSINESS" ? "NORMAL" : "BUSINESS"}`;
+        if (textEl) {
+            textEl.textContent = tipoFinal;
+        } else {
+            btnEl.textContent = tipoFinal;
+        }
+        notificarRelacionamento(`WhatsApp alterado para ${tipoFinal}`, "success");
+    } catch (err) {
+        notificarRelacionamento(err.message || "Erro ao alterar tipo do WhatsApp.", "error");
+    } finally {
+        btnEl.disabled = false;
+        btnEl.classList.remove("is-loading");
+    }
+}
+
 function escapeHtml(str) {
     if (!str) return "";
     return String(str)
@@ -671,23 +800,171 @@ document.addEventListener("keydown", function(e) {
 }
 
 .badge {
-    display: inline-block;
-    padding: 3px 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 4px 11px;
     border-radius: 999px;
-    font-size: .7rem;
+    font-size: .72rem;
     font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+.badge-toggle {
+    cursor: pointer;
+    transition: transform 0.15s ease, filter 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+    user-select: none;
+    line-height: 1.25;
+}
+
+.badge-toggle:hover:not(:disabled) {
+    transform: translateY(-1px);
+    filter: brightness(1.18);
+    box-shadow: 0 0 12px rgba(74, 222, 128, 0.28);
+}
+
+.badge-toggle.badge-normal:hover:not(:disabled) {
+    box-shadow: 0 0 12px rgba(96, 165, 250, 0.35);
+}
+
+.badge-toggle:active:not(:disabled) {
+    transform: scale(0.96);
+}
+
+.badge-toggle:disabled,
+.badge-toggle.is-loading {
+    opacity: 0.6;
+    cursor: wait;
 }
 
 .badge-business {
     background: #16a34a33;
     color: #4ade80;
-    border: 1px solid rgba(74, 222, 128, 0.3);
+    border: 1px solid rgba(74, 222, 128, 0.35);
 }
 
 .badge-normal {
     background: #2563eb33;
     color: #93c5fd;
-    border: 1px solid rgba(147, 197, 253, 0.3);
+    border: 1px solid rgba(147, 197, 253, 0.35);
+}
+
+.chip-status-box {
+    margin-top: 8px;
+    margin-bottom: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.chip-status-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #94a3b8;
+}
+
+.chip-status-select {
+    width: 100%;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: #0b1326;
+    color: #e2e8f0;
+    border: 1px solid rgba(148, 163, 184, 0.32);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+.chip-status-select option {
+    background: #0f172a;
+    color: #f8fafc;
+    font-weight: 600;
+}
+
+.chip-status-select:hover:not(:disabled) {
+    border-color: #60a5fa;
+}
+
+.chip-status-select:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+.chip-status-select.status-select-disparando,
+.chip-status-select.status-select-em_uso {
+    background: rgba(79, 70, 229, 0.22);
+    color: #c7d2fe;
+    border-color: rgba(129, 140, 248, 0.55);
+}
+
+.chip-status-select.status-select-maturando,
+.chip-status-select.status-select-em_maturacao,
+.chip-status-select.status-select-maturacao {
+    background: rgba(217, 119, 6, 0.22);
+    color: #fde68a;
+    border-color: rgba(245, 158, 11, 0.55);
+}
+
+.chip-status-select.status-select-banido,
+.chip-status-select.status-select-bloqueado,
+.chip-status-select.status-select-restringido {
+    background: rgba(185, 28, 28, 0.28);
+    color: #fecaca;
+    border-color: rgba(248, 113, 113, 0.6);
+}
+
+.chip-status-select.status-select-sem_saldo {
+    background: rgba(234, 88, 12, 0.25);
+    color: #fdba74;
+    border-color: rgba(249, 115, 22, 0.6);
+}
+
+.chip-status-select.status-select-ativo,
+.chip-status-select.status-select-disponivel {
+    background: rgba(5, 150, 105, 0.22);
+    color: #a7f3d0;
+    border-color: rgba(52, 211, 153, 0.5);
+}
+
+.chip-status-select.status-select-maturado {
+    background: rgba(37, 99, 235, 0.24);
+    color: #bfdbfe;
+    border-color: rgba(96, 165, 250, 0.5);
+}
+
+.chip-status-select.status-select-descanso_1,
+.chip-status-select.status-select-descanso_2,
+.chip-status-select.status-select-descanso {
+    background: rgba(124, 58, 237, 0.22);
+    color: #ddd6fe;
+    border-color: rgba(167, 139, 250, 0.5);
+}
+
+.chip-status-select.status-select-pronto_para_maturar {
+    background: rgba(13, 148, 136, 0.22);
+    color: #99f6e4;
+    border-color: rgba(45, 212, 191, 0.5);
+}
+
+.chip-status-select.status-select-inativo {
+    background: rgba(71, 85, 105, 0.25);
+    color: #cbd5e1;
+    border-color: rgba(148, 163, 184, 0.4);
+}
+
+.chip-actions-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 6px;
+    flex-wrap: wrap;
 }
 
 .chip-empty {
@@ -705,7 +982,7 @@ document.addEventListener("keydown", function(e) {
     border-radius: 8px;
     cursor: pointer;
     font-size: .8rem;
-    margin-top: 6px;
+    margin-top: 0;
     display: inline-flex;
     align-items: center;
     gap: 6px;

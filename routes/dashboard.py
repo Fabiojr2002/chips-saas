@@ -76,6 +76,7 @@ def dashboard():
         "MATURANDO",
         "DISPONIVEL",
         "DISPONÍVEL",
+        "SEM SALDO",
         "RESTRINGIDO",
         "BANIDO",
         "CANCELADO",
