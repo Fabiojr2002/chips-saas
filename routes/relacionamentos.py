@@ -11,6 +11,7 @@ relacionamentos_bp = Blueprint("relacionamentos", __name__)
 bq = PostgresClient()
 
 STATUS_OPCOES = [
+    "DISPARANDO",
     "ATIVO",
     "EM_USO",
     "MATURANDO",

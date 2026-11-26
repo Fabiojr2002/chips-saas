@@ -71,6 +71,7 @@ def dashboard():
 
     # Ordem "inteligente" (você pode ajustar como quiser)
     status_order = [
+        "DISPARANDO",
         "ATIVO",
         "EM_USO",
         "MATURANDO",

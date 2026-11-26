@@ -15,7 +15,7 @@ const ALL_CHIPS = Array.isArray(window.chipsData) ? [...window.chipsData] : [];
 let chipsView = [...ALL_CHIPS];
 console.log("[Chips] Total recebido:", ALL_CHIPS.length);
 
-const STATUS_LIST = ["ATIVO", "EM_USO", "MATURANDO", "MATURADO", "DISPONÍVEL", "DESCANSO", "SEM_SALDO", "RESTRINGIDO", "BLOQUEADO", "BANIDO"];
+const STATUS_LIST = ["DISPARANDO", "ATIVO", "EM_USO", "MATURANDO", "MATURADO", "DISPONÍVEL", "DESCANSO", "SEM_SALDO", "RESTRINGIDO", "BLOQUEADO", "BANIDO"];
 const STATUS_ALIASES = { "DISPONIVEL": "DISPONÍVEL", "SEM SALDO": "SEM_SALDO" };
 function canonicalStatus(status) {
     const raw = String(status || "").trim();
@@ -317,3 +317,118 @@ document.querySelectorAll(".modal-overlay").forEach(modal => {
 const modalStatusEl = document.getElementById("modal_status");
 modalStatusEl?.addEventListener("change", () => { modalStatusEl.dataset.changed = "true"; });
 renderRows(ALL_CHIPS);
+
+/* ============================================================
+   NAVEGAÇÃO HORIZONTAL DA TABELA (ARRASTAR COM MOUSE + SETAS)
+   + SINCRONIA DE LARGURA DAS COLUNAS FIXAS (AÇÕES + NÚMERO)
+============================================================ */
+(function initChipsTableHorizontalScroll() {
+    const wrapper = document.getElementById("chipTableWrapper") || document.querySelector(".chip-table-wrapper");
+    if (!wrapper) return;
+
+    const btnLeft = document.getElementById("scrollTableLeft");
+    const btnRight = document.getElementById("scrollTableRight");
+
+    function syncStickyOffset() {
+        const firstCell = wrapper.querySelector("tbody td:first-child") || wrapper.querySelector("thead th:first-child");
+        if (firstCell) {
+            const w = Math.ceil(firstCell.getBoundingClientRect().width);
+            if (w > 100) {
+                wrapper.style.setProperty("--col-actions-w", `${w}px`);
+            }
+        }
+    }
+
+    function updateScrollButtons() {
+        const maxScroll = Math.max(0, wrapper.scrollWidth - wrapper.clientWidth);
+        if (btnLeft) btnLeft.disabled = wrapper.scrollLeft <= 2;
+        if (btnRight) btnRight.disabled = wrapper.scrollLeft >= maxScroll - 2;
+        wrapper.classList.toggle("is-scrolled-x", wrapper.scrollLeft > 2);
+    }
+
+    function scrollByStep(delta) {
+        wrapper.scrollBy({ left: delta, behavior: "smooth" });
+    }
+
+    // Clique simples ou segurar pressionado nas setas
+    function bindHoldButton(btn, direction) {
+        if (!btn) return;
+        let holdTimer = null;
+        let holdInterval = null;
+        let didHold = false;
+
+        const stopHold = () => {
+            if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+            if (holdInterval) { clearInterval(holdInterval); holdInterval = null; }
+        };
+
+        btn.addEventListener("mousedown", (e) => {
+            if (e.button !== 0) return;
+            didHold = false;
+            holdTimer = setTimeout(() => {
+                didHold = true;
+                holdInterval = setInterval(() => {
+                    wrapper.scrollLeft += direction * 28;
+                    updateScrollButtons();
+                }, 16);
+            }, 220);
+        });
+
+        btn.addEventListener("click", () => {
+            if (!didHold) scrollByStep(direction * 380);
+            didHold = false;
+        });
+
+        ["mouseup", "mouseleave", "blur"].forEach(ev => btn.addEventListener(ev, stopHold));
+    }
+
+    bindHoldButton(btnLeft, -1);
+    bindHoldButton(btnRight, 1);
+
+    // Arrastar a tabela segurando com o mouse
+    let isDragging = false;
+    let startX = 0;
+    let startScrollLeft = 0;
+
+    wrapper.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest("button, a, input, select, textarea, label")) return;
+        isDragging = true;
+        startX = e.pageX - wrapper.offsetLeft;
+        startScrollLeft = wrapper.scrollLeft;
+        wrapper.classList.add("is-dragging");
+        e.preventDefault();
+    });
+
+    window.addEventListener("mousemove", (e) => {
+        if (!isDragging) return;
+        const x = e.pageX - wrapper.offsetLeft;
+        const walk = (x - startX) * 1.35;
+        wrapper.scrollLeft = startScrollLeft - walk;
+    });
+
+    window.addEventListener("mouseup", () => {
+        if (!isDragging) return;
+        isDragging = false;
+        wrapper.classList.remove("is-dragging");
+    });
+
+    // Atalho das setas esquerda/direita do teclado (quando não está digitando ou com modal aberto)
+    document.addEventListener("keydown", (e) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        const tag = (document.activeElement?.tagName || "").toUpperCase();
+        if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
+        if (document.body.classList.contains("modal-open")) return;
+        e.preventDefault();
+        scrollByStep(e.key === "ArrowRight" ? 320 : -320);
+    });
+
+    wrapper.addEventListener("scroll", updateScrollButtons, { passive: true });
+    window.addEventListener("resize", () => { syncStickyOffset(); updateScrollButtons(); });
+
+    // Re-sincroniza depois que chips_crud.js adicionar o botão de lixeira
+    setTimeout(() => { syncStickyOffset(); updateScrollButtons(); }, 120);
+    setTimeout(() => { syncStickyOffset(); updateScrollButtons(); }, 450);
+    syncStickyOffset();
+    updateScrollButtons();
+})();
