@@ -64,35 +64,41 @@ def insert_event(conn, sk_chip, tipo, obs):
 def relacionamentos_home():
     try:
         df = sanitize_df(bq.run_df(f"SELECT * FROM {bq.table('vw_relacionamentos_whatsapp')}"))
-        chips_status_df = sanitize_df(bq.run_df(f"""
-            SELECT sk_chip, status
+        chips_ativos_df = sanitize_df(bq.run_df(f"""
+            SELECT sk_chip, numero, operadora, tipo_whatsapp, status, sk_aparelho_atual, slot_whatsapp
             FROM {bq.table('dim_chip')}
             WHERE COALESCE(ativo, TRUE) = TRUE
         """))
-        status_by_sk = {}
-        if not chips_status_df.empty:
-            for _, r in chips_status_df.iterrows():
-                sk = to_int(r.get("sk_chip"))
-                if sk:
-                    st = r.get("status")
-                    status_by_sk[sk] = str(st).strip() if not is_null(st) else "DISPONIVEL"
 
-        chips_livres_df = bq.run_df(f"""
-            SELECT sk_chip, numero, operadora, tipo_whatsapp, status
-            FROM {bq.table('dim_chip')}
-            WHERE ativo = TRUE AND sk_aparelho_atual IS NULL
-            ORDER BY numero
-        """)
-        chips_livres = [
-            {
-                "sk_chip": to_int(r["sk_chip"]),
-                "numero": r["numero"],
-                "operadora": r["operadora"],
-                "tipo_whatsapp": r.get("tipo_whatsapp") or "A DEFINIR",
-                "status": r.get("status") or "DISPONIVEL",
-            }
-            for _, r in chips_livres_df.iterrows()
-        ] if not chips_livres_df.empty else []
+        linked_by_aparelho = {}
+        chips_livres = []
+        if not chips_ativos_df.empty:
+            for _, r in chips_ativos_df.iterrows():
+                sk = to_int(r.get("sk_chip"))
+                if not sk:
+                    continue
+                ap_atual = to_int(r.get("sk_aparelho_atual"))
+                st = r.get("status")
+                status_clean = str(st).strip() if not is_null(st) else "DISPONIVEL"
+                if ap_atual is None:
+                    chips_livres.append({
+                        "sk_chip": sk,
+                        "numero": r.get("numero"),
+                        "operadora": r.get("operadora"),
+                        "tipo_whatsapp": r.get("tipo_whatsapp") or "A DEFINIR",
+                        "status": status_clean,
+                    })
+                else:
+                    linked_by_aparelho.setdefault(ap_atual, []).append({
+                        "sk_chip": sk,
+                        "numero": r.get("numero"),
+                        "operadora": r.get("operadora"),
+                        "tipo_whatsapp": r.get("tipo_whatsapp"),
+                        "status": status_clean,
+                        "slot_whatsapp": to_int(r.get("slot_whatsapp")),
+                    })
+
+        chips_livres.sort(key=lambda c: str(c.get("numero") or ""))
         if df.empty:
             return render_template("relacionamentos.html", aparelhos=[], chips_livres=chips_livres, status_opcoes=STATUS_OPCOES)
         aparelhos = []
@@ -102,23 +108,45 @@ def relacionamentos_home():
                 continue
             cap_bus = to_int(g["cap_whats_business"].iloc[0]) if "cap_whats_business" in g.columns else 0
             cap_norm = to_int(g["cap_whats_normal"].iloc[0]) if "cap_whats_normal" in g.columns else 0
-            slots = {i: None for i in range(1, cap_bus + cap_norm + 1)}
-            for _, r in g.iterrows():
-                sk_chip, slot = to_int(r.get("sk_chip")), to_int(r.get("slot_whatsapp"))
-                if sk_chip and slot in slots:
-                    tipo = r.get("tipo_whatsapp")
-                    tipo_norm = ("BUSINESS" if slot <= cap_bus else "NORMAL") if is_null(tipo) else str(tipo).strip().upper()
-                    if tipo_norm not in ("BUSINESS", "NORMAL"):
-                        tipo_norm = "BUSINESS" if slot <= cap_bus else "NORMAL"
-                    status_val = r.get("status") if ("status" in r and not is_null(r.get("status"))) else status_by_sk.get(sk_chip, "DISPONIVEL")
-                    slots[slot] = {
-                        "sk_chip": sk_chip,
-                        "numero": r.get("numero"),
-                        "operadora": r.get("operadora"),
-                        "tipo_whatsapp": tipo_norm,
-                        "status": str(status_val).strip() if not is_null(status_val) else "DISPONIVEL",
-                    }
-            aparelhos.append({"sk_aparelho": sk_aparelho, "marca": g["marca"].iloc[0], "modelo": g["modelo"].iloc[0], "capacidade_total": cap_bus + cap_norm, "cap_whats_business": cap_bus, "cap_whats_normal": cap_norm, "slots": [{"slot": s, "chip": slots[s]} for s in range(1, cap_bus + cap_norm + 1)]})
+            cap_total = cap_bus + cap_norm
+            slots = {i: None for i in range(1, cap_total + 1)}
+            extra_slots = []
+
+            for ch in linked_by_aparelho.get(sk_aparelho, []):
+                slot = ch.get("slot_whatsapp")
+                tipo = ch.get("tipo_whatsapp")
+                tipo_norm = ("BUSINESS" if (slot is not None and slot <= cap_bus) else "NORMAL") if is_null(tipo) else str(tipo).strip().upper()
+                if tipo_norm not in ("BUSINESS", "NORMAL"):
+                    tipo_norm = "BUSINESS" if (slot is not None and slot <= cap_bus) else "NORMAL"
+                chip_obj = {
+                    "sk_chip": ch["sk_chip"],
+                    "numero": ch["numero"],
+                    "operadora": ch["operadora"],
+                    "tipo_whatsapp": tipo_norm,
+                    "status": ch["status"],
+                }
+                if slot in slots and slots[slot] is None:
+                    slots[slot] = chip_obj
+                else:
+                    extra_slots.append({
+                        "slot": slot or 0,
+                        "chip": chip_obj,
+                        "extra": True,
+                        "motivo": f"Slot {slot} (fora da capacidade)" if (slot and slot > cap_total) else ("Slot duplicado" if slot in slots else "Sem slot definido"),
+                    })
+
+            lista_slots = [{"slot": s, "chip": slots[s], "extra": False, "motivo": None} for s in range(1, cap_total + 1)]
+            lista_slots.extend(extra_slots)
+
+            aparelhos.append({
+                "sk_aparelho": sk_aparelho,
+                "marca": g["marca"].iloc[0],
+                "modelo": g["modelo"].iloc[0],
+                "capacidade_total": cap_total,
+                "cap_whats_business": cap_bus,
+                "cap_whats_normal": cap_norm,
+                "slots": lista_slots,
+            })
         aparelhos.sort(key=sort_key_aparelho)
         return render_template("relacionamentos.html", aparelhos=aparelhos, chips_livres=chips_livres, status_opcoes=STATUS_OPCOES)
     except Exception as e:
@@ -131,9 +159,20 @@ def relacionamentos_vincular():
     try:
         data = request.get_json(force=True) or {}
         sk_chip, sk_aparelho, slot = to_int(data.get("sk_chip")), to_int(data.get("sk_aparelho")), to_int(data.get("slot"))
-        tipo = data.get("tipo") or data.get("tipo_whatsapp") or "NORMAL"
+        tipo_informado = str(data.get("tipo") or data.get("tipo_whatsapp") or "").strip().upper()
         if not sk_chip or not sk_aparelho or not slot:
             return jsonify({"ok": False, "error": "Dados inválidos"}), 400
+        if tipo_informado not in ("BUSINESS", "NORMAL"):
+            cap_row = bq.run_df(f"""
+                SELECT cap_whats_business
+                FROM {bq.table('vw_relacionamentos_whatsapp')}
+                WHERE sk_aparelho = :sk_aparelho
+                LIMIT 1
+            """, {"sk_aparelho": sk_aparelho})
+            cap_bus = to_int(cap_row["cap_whats_business"].iloc[0]) if (not cap_row.empty and "cap_whats_business" in cap_row.columns) else 0
+            tipo = "BUSINESS" if (cap_bus and slot <= cap_bus) else "NORMAL"
+        else:
+            tipo = tipo_informado
         with bq.engine.begin() as conn:
             ocupado = conn.execute(text(f"""
                 SELECT sk_chip FROM {bq.table('dim_chip')}

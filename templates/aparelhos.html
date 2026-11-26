@@ -109,6 +109,7 @@
                             <th>Marca</th>
                             <th>IMEI</th>
                             <th>Status</th>
+                            <th>Chips Vinculados</th>
                             <th>Ações</th>
                         </tr>
                     </thead>
@@ -127,6 +128,22 @@
                                 </span>
                             </td>
                             <td>
+                                <div style="display:flex; flex-direction:column; gap:4px;">
+                                    <a href="/relacionamentos#aparelho-{{ a.sk_aparelho }}" style="color:#60a5fa; font-weight:700; text-decoration:none;">
+                                        <i class="fas fa-link"></i> {{ a.qtd_chips_vinculados or 0 }} chip(s)
+                                    </a>
+                                    {% if a.chips_vinculados %}
+                                    <div style="display:flex; flex-wrap:wrap; gap:4px; max-width:340px;">
+                                        {% for ch in a.chips_vinculados %}
+                                        <span style="font-size:0.74rem; padding:2px 7px; border-radius:999px; background:rgba(37,99,235,0.2); border:1px solid rgba(96,165,250,0.35); color:#cbd5e1; font-family:monospace;">
+                                            {{ ch.numero }}{% if ch.slot_whatsapp %} (S{{ ch.slot_whatsapp }}){% endif %}
+                                        </span>
+                                        {% endfor %}
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
                                 <button
                                     class="btn-edit"
                                     onclick='editarAparelho(
@@ -143,7 +160,7 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="6" style="text-align:center; color:#64748b;">
+                            <td colspan="7" style="text-align:center; color:#64748b;">
                                 Nenhum aparelho cadastrado
                             </td>
                         </tr>

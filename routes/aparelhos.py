@@ -35,6 +35,36 @@ def aparelhos_list():
 
         aparelhos = df.to_dict(orient="records")
 
+        chips_df = sanitize_df(bq.run_df(f"""
+            SELECT sk_chip, numero, status, sk_aparelho_atual, slot_whatsapp, tipo_whatsapp
+            FROM {bq.table('dim_chip')}
+            WHERE COALESCE(ativo, TRUE) = TRUE AND sk_aparelho_atual IS NOT NULL
+            ORDER BY slot_whatsapp NULLS LAST, numero
+        """))
+        chips_por_aparelho = {}
+        if not chips_df.empty:
+            for _, r in chips_df.iterrows():
+                try:
+                    sk_ap = int(float(r.get("sk_aparelho_atual")))
+                except Exception:
+                    continue
+                chips_por_aparelho.setdefault(sk_ap, []).append({
+                    "sk_chip": int(float(r.get("sk_chip"))) if r.get("sk_chip") is not None else None,
+                    "numero": r.get("numero") or "",
+                    "status": r.get("status") or "",
+                    "slot_whatsapp": int(float(r.get("slot_whatsapp"))) if r.get("slot_whatsapp") not in (None, "") else None,
+                    "tipo_whatsapp": r.get("tipo_whatsapp") or "",
+                })
+
+        for ap in aparelhos:
+            try:
+                sk_ap = int(float(ap.get("sk_aparelho")))
+            except Exception:
+                sk_ap = None
+            vinculados = chips_por_aparelho.get(sk_ap, []) if sk_ap is not None else []
+            ap["chips_vinculados"] = vinculados
+            ap["qtd_chips_vinculados"] = len(vinculados)
+
         return render_template(
             "aparelhos.html",
             aparelhos=aparelhos

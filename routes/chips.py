@@ -86,12 +86,99 @@ def insert_event(sk_chip, tipo_evento, observacao, origem="Painel", categoria=No
     try: bq.insert_event(sk_chip, tipo_evento, observacao, origem, categoria, campo, valor_antigo, valor_novo)
     except Exception as exc: print(f"⚠️ Evento não registrado ({tipo_evento}) para sk_chip={sk_chip}: {exc}")
 
+def get_aparelho_capacidade(sk_aparelho):
+    try:
+        row = fetch_one(f"""
+            SELECT cap_whats_business, cap_whats_normal
+            FROM {bq.table('vw_relacionamentos_whatsapp')}
+            WHERE sk_aparelho = :ap
+            LIMIT 1
+        """, {"ap": int(sk_aparelho)})
+        if row:
+            cap_bus = to_int(row.get("cap_whats_business"), 0) or 0
+            cap_norm = to_int(row.get("cap_whats_normal"), 0) or 0
+            return cap_bus, cap_norm, cap_bus + cap_norm
+    except Exception as exc:
+        print(f"[Chips] Aviso ao ler capacidade do aparelho {sk_aparelho}: {exc}")
+    return 0, 0, 0
+
+
+def resolve_and_validate_slot(sk_chip, sk_aparelho, slot):
+    sk_aparelho = to_int(sk_aparelho)
+    slot = to_int(slot)
+    if not sk_aparelho:
+        return None, None
+
+    cap_bus, cap_norm, cap_total = get_aparelho_capacidade(sk_aparelho)
+
+    params = {"ap": sk_aparelho}
+    extra = ""
+    if sk_chip:
+        extra = " AND sk_chip <> :sk"
+        params["sk"] = int(sk_chip)
+
+    ocupados_df = bq.run_df(f"""
+        SELECT slot_whatsapp
+        FROM {bq.table('dim_chip')}
+        WHERE sk_aparelho_atual = :ap
+          AND slot_whatsapp IS NOT NULL
+          AND COALESCE(ativo, TRUE) = TRUE{extra}
+    """, params)
+    ocupados = {
+        to_int(r["slot_whatsapp"])
+        for _, r in ocupados_df.iterrows()
+        if to_int(r["slot_whatsapp"]) is not None
+    } if not ocupados_df.empty else set()
+
+    if not slot or slot < 1:
+        if cap_total > 0:
+            livre = next((s for s in range(1, cap_total + 1) if s not in ocupados), None)
+            if livre is None:
+                raise ValueError(f"Este aparelho já está com todos os {cap_total} slots ocupados.")
+            slot = livre
+        else:
+            raise ValueError("Informe o slot WhatsApp ao vincular um aparelho.")
+    else:
+        if cap_total > 0 and slot > cap_total:
+            raise ValueError(f"Slot inválido ({slot}). Este aparelho suporta slots de 1 até {cap_total}.")
+        if slot in ocupados:
+            raise ValueError(f"O slot {slot} já está ocupado no aparelho selecionado.")
+
+    default_tipo = "BUSINESS" if (cap_bus > 0 and slot <= cap_bus) else "NORMAL"
+    return slot, default_tipo
+
+
+def record_aparelho_movimento(sk_chip, sk_aparelho, slot, tipo_whatsapp, tipo_movimento, observacao):
+    try:
+        if tipo_movimento == "VINCULO":
+            bq.run(f"""
+                INSERT INTO {bq.table('f_chip_aparelho')}
+                (sk_fato, sk_chip, sk_aparelho, slot_whatsapp, tipo_whatsapp, tipo_movimento, data_movimento, origem, observacao, created_at)
+                VALUES (
+                    (SELECT COALESCE(MAX(sk_fato), 0) + 1 FROM {bq.table('f_chip_aparelho')}),
+                    :sk_chip, :sk_aparelho, :slot, :tipo, 'VINCULO', CURRENT_TIMESTAMP, 'Painel', :obs, CURRENT_TIMESTAMP
+                )
+            """, {"sk_chip": int(sk_chip), "sk_aparelho": int(sk_aparelho), "slot": to_int(slot), "tipo": tipo_whatsapp, "obs": observacao})
+        else:
+            bq.run(f"""
+                INSERT INTO {bq.table('f_chip_aparelho')}
+                (sk_fato, sk_chip, tipo_movimento, data_movimento, origem, observacao, created_at)
+                VALUES (
+                    (SELECT COALESCE(MAX(sk_fato), 0) + 1 FROM {bq.table('f_chip_aparelho')}),
+                    :sk_chip, 'DESVINCULO', CURRENT_TIMESTAMP, 'Painel', :obs, CURRENT_TIMESTAMP
+                )
+            """, {"sk_chip": int(sk_chip), "obs": observacao})
+    except Exception as exc:
+        print(f"⚠️ Movimento f_chip_aparelho não registrado ({tipo_movimento}) para sk_chip={sk_chip}: {exc}")
+
+
 def _vincular_chip(sk_chip, sk_aparelho, slot, tipo_whatsapp=None):
-    if not slot: raise ValueError("Slot WhatsApp é obrigatório para vincular aparelho.")
-    dup = fetch_one(f"""SELECT sk_chip FROM {bq.table('dim_chip')} WHERE sk_aparelho_atual=:ap AND slot_whatsapp=:slot AND sk_chip<>:sk AND COALESCE(ativo,TRUE)=TRUE LIMIT 1""", {"ap": sk_aparelho, "slot": slot, "sk": sk_chip})
-    if dup: raise ValueError("Este slot já está ocupado no aparelho selecionado.")
-    bq.run(f"""UPDATE {bq.table('dim_chip')} SET sk_aparelho_atual=:ap, slot_whatsapp=:slot, tipo_whatsapp=:tipo, updated_at=CURRENT_TIMESTAMP WHERE sk_chip=:sk""", {"ap": sk_aparelho, "slot": slot, "tipo": tipo_whatsapp, "sk": sk_chip})
-    insert_event(sk_chip, "VINCULO_APARELHO", f"Vinculado ao aparelho {sk_aparelho}, slot {slot}")
+    slot_resolvido, default_tipo = resolve_and_validate_slot(sk_chip, sk_aparelho, slot)
+    tipo_final = clean_text(tipo_whatsapp) or default_tipo
+    bq.run(f"""UPDATE {bq.table('dim_chip')} SET sk_aparelho_atual=:ap, slot_whatsapp=:slot, tipo_whatsapp=:tipo, updated_at=CURRENT_TIMESTAMP WHERE sk_chip=:sk""", {"ap": int(sk_aparelho), "slot": slot_resolvido, "tipo": tipo_final, "sk": int(sk_chip)})
+    record_aparelho_movimento(sk_chip, sk_aparelho, slot_resolvido, tipo_final, "VINCULO", "Vínculo WhatsApp (Gestão de Chips)")
+    insert_event(sk_chip, "VINCULO_APARELHO", f"Vinculado ao aparelho {sk_aparelho}, slot {slot_resolvido}")
+    return slot_resolvido, tipo_final
 
 
 @chips_bp.route("/chips")
@@ -138,8 +225,17 @@ def chips_add():
     try:
         if chip_by_clean_number(numero_limpo): flash("Chip já cadastrado para este número.", "error"); return redirect(url_for("chips.chips_list"))
         sk_chip = bq.next_id("dim_chip", "sk_chip"); status = clean_text(data.get("status"), "DISPONIVEL")
-        bq.run(f"""INSERT INTO {bq.table('dim_chip')} (sk_chip,id_chip,numero,operadora,plano,status,observacao,operador,tipo_whatsapp,slot_whatsapp,qt_disparos,qt_banimentos,dt_banimentos,ativo,total_gasto,maturando_em,created_at,updated_at) VALUES (:sk_chip,:id_chip,:numero,:operadora,:plano,:status,:observacao,:operador,:tipo_whatsapp,:slot_whatsapp,:qt_disparos,:qt_banimentos,:dt_banimentos,TRUE,0,CASE WHEN LOWER(:status) IN ('maturando','em maturacao','maturacao') THEN CURRENT_TIMESTAMP ELSE NULL END,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)""", {"sk_chip": sk_chip, "id_chip": clean_text(data.get("id_chip"), f"CHIP-{uuid.uuid4().hex[:10].upper()}"), "numero": numero_limpo, "operadora": operadora, "plano": clean_text(data.get("plano"), ""), "status": status, "observacao": clean_text(data.get("observacao"), ""), "operador": clean_text(data.get("operador")), "tipo_whatsapp": clean_text(data.get("tipo_whatsapp")), "slot_whatsapp": to_int(data.get("slot_whatsapp")), "qt_disparos": to_int(data.get("qt_disparos"),0), "qt_banimentos": to_int(data.get("qt_banimentos"),0), "dt_banimentos": clean_text(data.get("dt_banimentos"))})
-        if to_int(data.get("sk_aparelho_atual")): _vincular_chip(sk_chip, to_int(data.get("sk_aparelho_atual")), to_int(data.get("slot_whatsapp")), clean_text(data.get("tipo_whatsapp")))
+        ap_novo = to_int(data.get("sk_aparelho_atual"))
+        slot_novo = to_int(data.get("slot_whatsapp"))
+        tipo_novo = clean_text(data.get("tipo_whatsapp"))
+        if ap_novo:
+            slot_novo, default_tipo = resolve_and_validate_slot(None, ap_novo, slot_novo)
+            if not tipo_novo:
+                tipo_novo = default_tipo
+        else:
+            slot_novo = None
+        bq.run(f"""INSERT INTO {bq.table('dim_chip')} (sk_chip,id_chip,numero,operadora,plano,status,observacao,operador,tipo_whatsapp,slot_whatsapp,qt_disparos,qt_banimentos,dt_banimentos,ativo,total_gasto,maturando_em,created_at,updated_at) VALUES (:sk_chip,:id_chip,:numero,:operadora,:plano,:status,:observacao,:operador,:tipo_whatsapp,:slot_whatsapp,:qt_disparos,:qt_banimentos,:dt_banimentos,TRUE,0,CASE WHEN LOWER(:status) IN ('maturando','em maturacao','maturacao') THEN CURRENT_TIMESTAMP ELSE NULL END,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)""", {"sk_chip": sk_chip, "id_chip": clean_text(data.get("id_chip"), f"CHIP-{uuid.uuid4().hex[:10].upper()}"), "numero": numero_limpo, "operadora": operadora, "plano": clean_text(data.get("plano"), ""), "status": status, "observacao": clean_text(data.get("observacao"), ""), "operador": clean_text(data.get("operador")), "tipo_whatsapp": tipo_novo, "slot_whatsapp": slot_novo, "qt_disparos": to_int(data.get("qt_disparos"),0), "qt_banimentos": to_int(data.get("qt_banimentos"),0), "dt_banimentos": clean_text(data.get("dt_banimentos"))})
+        if ap_novo: _vincular_chip(sk_chip, ap_novo, slot_novo, tipo_novo)
         insert_event(sk_chip, "CADASTRO", "Cadastro realizado pelo painel"); flash(f"Chip cadastrado com sucesso (SK {sk_chip}).", "success")
     except Exception as e: print(f"🚨 Erro ao cadastrar chip: {e}"); flash(f"Erro ao cadastrar chip: {e}", "error")
     return redirect(url_for("chips.chips_list"))
@@ -165,7 +261,11 @@ def chips_update_json():
         if "sk_aparelho_atual" in p:
             ap = to_int(p.get("sk_aparelho_atual"))
             if ap: _vincular_chip(sk, ap, to_int(p.get("slot_whatsapp")), clean_text(p.get("tipo_whatsapp")))
-            else: bq.run(f"UPDATE {bq.table('dim_chip')} SET sk_aparelho_atual=NULL, slot_whatsapp=NULL, tipo_whatsapp=NULL, updated_at=CURRENT_TIMESTAMP WHERE sk_chip=:sk", {"sk": sk}); insert_event(sk, "DESVINCULO_APARELHO", "Desvinculado pelo painel")
+            else:
+                bq.run(f"UPDATE {bq.table('dim_chip')} SET sk_aparelho_atual=NULL, slot_whatsapp=NULL, tipo_whatsapp=NULL, updated_at=CURRENT_TIMESTAMP WHERE sk_chip=:sk", {"sk": sk})
+                if atual.get("sk_aparelho_atual"):
+                    record_aparelho_movimento(sk, None, None, None, "DESVINCULO", "Desvinculação pelo painel (Gestão de Chips)")
+                    insert_event(sk, "DESVINCULO_APARELHO", "Desvinculado pelo painel")
         insert_event(sk, "EDICAO", "Chip editado pelo painel"); return jsonify({"success": True})
     except Exception as e: print("🚨 Erro ao editar chip:", e); return jsonify({"error": str(e)}),500
 

@@ -5,7 +5,17 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 from sqlalchemy import text
 
-from routes.chips import bq, chip_by_clean_number, clean_text, insert_event, only_digits, to_float, to_int
+from routes.chips import (
+    bq,
+    chip_by_clean_number,
+    clean_text,
+    insert_event,
+    only_digits,
+    record_aparelho_movimento,
+    resolve_and_validate_slot,
+    to_float,
+    to_int,
+)
 
 chips_crud_bp = Blueprint("chips_crud", __name__)
 
@@ -142,9 +152,34 @@ def update_chip_completo():
                 values["maturando_em"] = None
                 fields.append("maturando_em")
 
-        aparelho = values.get("sk_aparelho_atual", current.get("sk_aparelho_atual"))
-        slot = values.get("slot_whatsapp", current.get("slot_whatsapp"))
-        _validate_device_slot(sk_chip, aparelho, slot)
+        aparelho_antigo = to_int(current.get("sk_aparelho_atual"))
+        slot_antigo = to_int(current.get("slot_whatsapp"))
+        aparelho = to_int(values.get("sk_aparelho_atual")) if "sk_aparelho_atual" in values else aparelho_antigo
+        slot = to_int(values.get("slot_whatsapp")) if "slot_whatsapp" in values else slot_antigo
+
+        if aparelho:
+            slot_resolvido, default_tipo = resolve_and_validate_slot(sk_chip, aparelho, slot)
+            values["sk_aparelho_atual"] = aparelho
+            values["slot_whatsapp"] = slot_resolvido
+            if "sk_aparelho_atual" not in fields and "sk_aparelho_atual" in columns:
+                fields.append("sk_aparelho_atual")
+            if "slot_whatsapp" not in fields and "slot_whatsapp" in columns:
+                fields.append("slot_whatsapp")
+            if "tipo_whatsapp" in columns and not values.get("tipo_whatsapp"):
+                values["tipo_whatsapp"] = clean_text(current.get("tipo_whatsapp")) or default_tipo
+                if "tipo_whatsapp" not in fields:
+                    fields.append("tipo_whatsapp")
+        elif "sk_aparelho_atual" in payload:
+            # Ao remover o aparelho, limpa slot e tipo para manter 100% sincronizado com Relacionamentos
+            values["sk_aparelho_atual"] = None
+            if "slot_whatsapp" in columns:
+                values["slot_whatsapp"] = None
+                if "slot_whatsapp" not in fields:
+                    fields.append("slot_whatsapp")
+            if "tipo_whatsapp" in columns:
+                values["tipo_whatsapp"] = None
+                if "tipo_whatsapp" not in fields:
+                    fields.append("tipo_whatsapp")
 
         fields = list(dict.fromkeys(fields))
         assignments = [f"{field} = :{field}" for field in fields]
@@ -155,6 +190,30 @@ def update_chip_completo():
             f"UPDATE {bq.table('dim_chip')} SET {', '.join(assignments)} WHERE sk_chip = :sk_chip",
             values,
         )
+
+        # Sincroniza histórico de vínculo/desvínculo em f_chip_aparelho e f_chip_evento
+        slot_novo = to_int(values.get("slot_whatsapp")) if "slot_whatsapp" in values else slot_antigo
+        tipo_novo = values.get("tipo_whatsapp") if "tipo_whatsapp" in values else current.get("tipo_whatsapp")
+        if aparelho and (aparelho != aparelho_antigo or slot_novo != slot_antigo):
+            record_aparelho_movimento(
+                sk_chip,
+                aparelho,
+                slot_novo,
+                tipo_novo,
+                "VINCULO",
+                "Vínculo WhatsApp (Gestão de Chips)",
+            )
+            insert_event(sk_chip, "VINCULO_APARELHO", f"Vinculado ao aparelho {aparelho}, slot {slot_novo} (Gestão de Chips)")
+        elif not aparelho and aparelho_antigo:
+            record_aparelho_movimento(
+                sk_chip,
+                None,
+                None,
+                None,
+                "DESVINCULO",
+                "Desvinculação de aparelho (Gestão de Chips)",
+            )
+            insert_event(sk_chip, "DESVINCULO_APARELHO", "Desvinculado de aparelho (Gestão de Chips)")
 
         changed = [field for field in fields if str(current.get(field)) != str(values.get(field))]
         insert_event(

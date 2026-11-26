@@ -79,15 +79,15 @@
         <div class="slots-grid">
 
         {% for slot in a.slots %}
-        {% set slot_titulo = nome_slot_motorola(slot.slot)|trim if ('MOTOROLA' in a.marca|upper or 'MOTO' in a.modelo|upper) else nome_slot_outros(slot.slot)|trim %}
-        <div class="slot-card"
+        {% set slot_titulo = slot.motivo if slot.extra else (nome_slot_motorola(slot.slot)|trim if ('MOTOROLA' in a.marca|upper or 'MOTO' in a.modelo|upper) else nome_slot_outros(slot.slot)|trim) %}
+        <div class="slot-card {{ 'slot-card-extra' if slot.extra else '' }}"
              id="slot-{{ a.sk_aparelho }}-{{ slot.slot }}"
              data-sk-aparelho="{{ a.sk_aparelho }}"
              data-slot="{{ slot.slot }}">
 
             <!-- ===== NOME VISUAL DO SLOT ===== -->
-            <div class="slot-number">
-                {{ slot_titulo }}
+            <div class="slot-number {{ 'slot-number-warning' if slot.extra else '' }}">
+                {% if slot.extra %}<i class="fas fa-exclamation-triangle"></i> {% endif %}{{ slot_titulo }}
             </div>
 
             <!-- ===== SLOT OCUPADO ===== -->
@@ -148,6 +148,7 @@
             {% endif %}
 
             <!-- ===== BOTÃO DE SELEÇÃO RÁPIDA DE CHIP COM BUSCA ===== -->
+            {% if not slot.extra %}
             <button type="button"
                     class="btn-trigger-picker"
                     onclick="abrirPickerChip({{ a.sk_aparelho }}, '{{ a.marca|escape }} • {{ a.modelo|escape }}', {{ slot.slot }}, '{{ slot_titulo|escape }}')">
@@ -160,6 +161,11 @@
                 </span>
                 <i class="fas fa-search picker-trigger-icon" title="Buscar chip na lista"></i>
             </button>
+            {% else %}
+            <div class="slot-extra-hint">
+                Vinculado fora da faixa de slots — remova e vincule em um slot válido.
+            </div>
+            {% endif %}
 
         </div>
         {% endfor %}
@@ -774,6 +780,26 @@ document.addEventListener("keydown", function(e) {
     font-weight: 600;
     margin-bottom: .6rem;
     font-size: 0.9rem;
+}
+
+.slot-card-extra {
+    border-color: rgba(245, 158, 11, 0.65);
+    background: rgba(120, 53, 15, 0.16);
+}
+
+.slot-number-warning {
+    color: #fbbf24;
+}
+
+.slot-extra-hint {
+    font-size: 0.74rem;
+    color: #fcd34d;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: 8px;
+    padding: 6px 8px;
+    margin-top: auto;
+    line-height: 1.35;
 }
 
 .chip-info {
